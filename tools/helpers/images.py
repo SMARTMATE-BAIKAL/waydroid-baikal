@@ -145,6 +145,13 @@ def make_prop(args, cfg, full_props_path):
     add_prop("waydroid.host.gid", "group_id")
     add_prop("waydroid.host_data_path", "waydroid_data")
     add_prop("waydroid.background_start", "background_start")
+    if cfg["background_start"] == "true":
+        # App-only sessions have no startup surface. Android otherwise waits for
+        # the invisible animation's complete outro before unlocking the user.
+        # Keep foreground sessions on their configured boot-animation policy.
+        props = [prop for prop in props
+                 if prop.split("=", 1)[0].strip() != "debug.sf.nobootanimation"]
+        props.append("debug.sf.nobootanimation=1")
     props.append("waydroid.xdg_runtime_dir=" + tools.config.defaults["container_xdg_runtime_dir"])
     props.append("waydroid.pulse_runtime_path=" + tools.config.defaults["container_pulse_runtime_path"])
     props.append("waydroid.wayland_display=" + tools.config.defaults["container_wayland_display"])
