@@ -9,6 +9,10 @@ lxc.cap.keep = audit_control sys_nice wake_alarm setpcap setgid setuid sys_ptrac
 
 lxc.mount.auto = cgroup:ro sys:ro proc
 
+# SysRq acts on the host kernel even from an Android PID namespace. Mask it
+# explicitly, including when a deployment overrides proc to a read-write mount.
+lxc.mount.entry = /usr/lib/waydroid/data/configs/deny-sysrq-trigger proc/sysrq-trigger none bind,ro,create=file 0 0
+
 lxc.console.path = none
 
 lxc.include = /var/lib/waydroid/lxc/waydroid/config_nodes
