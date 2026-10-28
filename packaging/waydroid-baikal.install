@@ -1,0 +1,71 @@
+# Maintainer: Timofei Granovskii <t.stifix@gmail.com>
+# One-time migration of the former locally installed launch wrappers.
+
+_remove_known_file() {
+    local path=$1 expected=$2 actual
+    [ -f "$path" ] || return 0
+    actual=$(sha256sum "$path")
+    if [ "${actual%% *}" = "$expected" ]; then
+        rm -- "$path"
+    else
+        printf 'waydroid-baikal: preserved modified legacy file %s\n' "$path"
+    fi
+}
+
+_migrate_launchers() {
+    local launcher
+    for launcher in /usr/share/applications/waydroid.*.desktop; do
+        [ -f "$launcher" ] || continue
+        if grep -q '^Exec=/usr/local/bin/waydroid-launch-app ' "$launcher"; then
+            sed -i \
+                -e 's@^Exec=/usr/local/bin/waydroid-launch-app --intent @Exec=/usr/bin/waydroid app intent @' \
+                -e 's@^Exec=/usr/local/bin/waydroid-launch-app @Exec=/usr/bin/waydroid app launch @' \
+                "$launcher"
+        fi
+    done
+}
+
+_migrate_legacy_services() {
+    local unit link
+    for unit in /etc/systemd/user/waydroid-session.service \
+                /etc/xdg/systemd/user/waydroid-session.service; do
+        _remove_known_file "$unit" 9f3d17753e6860446ad36aebad993691bbae18742125f596f1a78789e42a10a1
+    done
+
+    # These old targets run before the compositor imports its environment.
+    for link in /home/*/.config/systemd/user/default.target.wants/waydroid-session.service \
+                /home/*/.config/systemd/user/graphical-session-pre.target.wants/waydroid-session.service \
+                /etc/systemd/user/default.target.wants/waydroid-session.service \
+                /etc/systemd/user/graphical-session-pre.target.wants/waydroid-session.service; do
+        [ -L "$link" ] || continue
+        case $(readlink "$link") in
+            /etc/systemd/user/waydroid-session.service|/etc/xdg/systemd/user/waydroid-session.service)
+                [ -e "$link" ] || rm -- "$link"
+                ;;
+        esac
+    done
+
+    _remove_known_file /etc/systemd/system/waydroid-boot-warmup.service \
+        848f389b027c2af9c75610b6f85dcf26bc854a76811209c882ee93f29552da7a
+    link=/etc/systemd/system/graphical.target.wants/waydroid-boot-warmup.service
+    if [ -L "$link" ] && [ ! -e "$link" ]; then
+        rm -- "$link"
+    fi
+    _remove_known_file /etc/systemd/system/waydroid-container.service.d/25-media-qos.conf \
+        2447fe46dc8341ef487fab8dcb446bf3488d6a8f0c0d2099d0a788973f44bdb4
+    _remove_known_file /etc/systemd/system/waydroid-container.service.d/35-cgroup-subtree-control.conf \
+        d0067a562b92847374ffd6edfb7c55145212bfcb1ad4964cc03a5a89708ef50e
+    _remove_known_file /usr/local/bin/waydroid-session-keeper \
+        e1d6a34284fff268dc5d4b6b667d4957bbfed7aa4936dfaa49cb9f13d8f2a28f
+    _remove_known_file /usr/local/bin/waydroid-launch-app \
+        628472c200eee670c6255a58a90d35b3c9b946960f4bc0952262d0ac5abc35ec
+}
+
+post_install() {
+    _migrate_launchers
+    _migrate_legacy_services
+}
+
+post_upgrade() {
+    post_install
+}

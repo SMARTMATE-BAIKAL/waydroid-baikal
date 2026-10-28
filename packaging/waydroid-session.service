@@ -1,0 +1,27 @@
+# Maintainer: Timofei Granovskii <t.stifix@gmail.com>
+[Unit]
+Description=Waydroid Android application session
+Documentation=https://docs.waydro.id/
+# Join the login transaction without making the desktop target wait for Android.
+DefaultDependencies=no
+After=basic.target plasma-kwin_wayland.service
+Before=shutdown.target
+Conflicts=shutdown.target
+PartOf=graphical-session.target
+ConditionPathExists=/var/lib/waydroid/waydroid.cfg
+StartLimitIntervalSec=180s
+StartLimitBurst=3
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/waydroid session start
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=120s
+TimeoutStopSec=20s
+Slice=app.slice
+Environment=WAYDROID_TOUCH_CONTROLS=0
+
+[Install]
+WantedBy=plasma-workspace-wayland.target
