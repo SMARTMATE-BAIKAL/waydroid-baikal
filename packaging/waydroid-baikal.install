@@ -59,6 +59,42 @@ _migrate_legacy_services() {
         e1d6a34284fff268dc5d4b6b667d4957bbfed7aa4936dfaa49cb9f13d8f2a28f
     _remove_known_file /usr/local/bin/waydroid-launch-app \
         628472c200eee670c6255a58a90d35b3c9b946960f4bc0952262d0ac5abc35ec
+    # Retired implementations are preserved in the private repository archival ref.
+    _remove_known_file /usr/local/bin/waydroid-app-status \
+        5eac6a7c0d2e7fa631f0bc477bae0af0dc32b99f41bec3c99648503499a243b2
+    _remove_known_file /usr/local/bin/waydroid-kwin-gestures-watcher \
+        93e75e4f3bd017a9e174cf6fa84b1aed190f1624f016211c0fe0625079d52bd1
+    _remove_known_file /etc/systemd/user/waydroid-kwin-gestures.service \
+        04569d986777488feaa8bbad9983fc9cb3d8ed00872defb33fe8afdc4fd03dec
+    _remove_known_file /etc/xdg/systemd/user/waydroid-kwin-gestures.service \
+        04569d986777488feaa8bbad9983fc9cb3d8ed00872defb33fe8afdc4fd03dec
+    _remove_known_file /usr/local/lib/waydroid-route-cache-guard \
+        86ee9e3128076a828784dd9c031e353631314ca868292c1d434f57977bf82b86
+    _remove_known_file /etc/systemd/system/waydroid-route-cache-guard.service \
+        e17851c16a031db7b64395af728b12b12d3e0d26d08b0243f50b10752046679b
+    _remove_known_file /usr/local/lib/waydroid-panel-tune \
+        5ddb164a08243402d6a10dd874f440cf503afbd252e6f1fc9f3798e0980633db
+    _remove_known_file /etc/systemd/system/waydroid-panel-tune.service \
+        fe2e42a3cc750e85ae89277529e027f0593693934a244179fc54830c1fed3ae4
+    _remove_known_file /usr/local/lib/waydroid-permission-relaxer \
+        76c80d78af55e6851d49666d4e327765327f994e6495085cb33d4581bee69cab
+    _remove_known_file /etc/systemd/system/waydroid-permission-relaxer.service \
+        8d5f568ad1d10ef597d412384b46b5ee5508db5e91fcd2c6196a89937536484a
+    _remove_known_file /usr/lib/waydroid/tools/services/touch_controls_manager.py \
+        7ae741a77609a0a2c00cc46e7e892e2ce913e7416669bca62187a016cf87e788
+    _remove_known_file /usr/lib/waydroid/tools/actions/app_manager.py.before-launch-wrapper-20260531214112 \
+        8112cf0de9a0af1ada52b9bbcdd027e501a7fab68178856a4470278ba272e264
+    _remove_known_file /usr/lib/waydroid/tools/actions/app_manager.py.stock-before-stale-session-guard \
+        473c748f75edba7d05e7df213c61ca885b3edd7ad62f45630398ded3538410b3
+    _remove_known_file /usr/lib/waydroid/tools/actions/session_manager.py.before-touch-controls-20260531164549 \
+        46144261fc74b01eef16020135efdc4370a58642015ee484a457f808fbe471b4
+    _remove_known_file /usr/lib/waydroid/tools/interfaces/IPlatform.py.before-launch-wrapper-20260531214208 \
+        e9016076ba33ec811534ffd64851be43b009b8f83c6e03c044d8cecb19607d49
+    _remove_known_file /usr/lib/waydroid/tools/services/__init__.py.before-touch-controls-20260531164550 \
+        11e16d6a2de802709fce733846b0d8b59538e202973ad94051e344b6771b80f5
+    _remove_known_file /usr/lib/waydroid/tools/services/user_manager.py.before-launch-wrapper-20260531214112 \
+        a74a5c2f03b629005fa0a66c8c331198995cb0336398f79700f65f295fb20ae0
+
 }
 
 post_install() {

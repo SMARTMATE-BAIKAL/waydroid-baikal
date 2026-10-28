@@ -50,3 +50,11 @@ The package install transaction converts old global launcher commands and remove
 the known obsolete session keepers, warmup unit and manual cgroup controller writes.
 Legacy files are matched by SHA256 before removal; locally modified variants are
 reported and preserved for review. The normal runtime has no migration script.
+
+If an application is launched before the session exists, the native CLI activates
+`waydroid-session.service` through systemd D-Bus and waits for its readiness job.
+It never starts an unmanaged foreground Android desktop.
+
+Known obsolete helper implementations are removed only on exact hash matches.
+Their original bytes and metadata are preserved in the private artifacts
+repository at `preserve/waydroid-obsolete-runtime-20261028`.
