@@ -110,6 +110,65 @@ class ReadinessTests(unittest.TestCase):
 
 
 class LaunchTests(unittest.TestCase):
+    def test_stopped_session_activates_native_unit_before_launch(self):
+        events = []
+        missing = dbus.exceptions.DBusException(
+            "no session", name="org.freedesktop.DBus.Error.NameHasNoOwner")
+        session = Mock()
+        container = Mock()
+        session.WaitForReady.side_effect = lambda **kwargs: events.append("ready")
+        container.Unfreeze.side_effect = lambda: events.append("unfreeze")
+        with patch.object(app_manager.tools.helpers.ipc, "DBusSessionService", side_effect=[missing, session]), \
+                patch.object(app_manager.tools.helpers.ipc, "DBusContainerService", return_value=container), \
+                patch.object(app_manager, "start_session", side_effect=lambda timeout: events.append("start-unit")) as activate, \
+                patch.object(session_manager, "start") as unmanaged:
+            app_manager.maybeLaunchLater(SimpleNamespace(timeout=30), lambda: events.append("launch"))
+        self.assertEqual(events, ["start-unit", "unfreeze", "ready", "launch"])
+        activate.assert_called_once_with(30)
+        unmanaged.assert_not_called()
+
+    def test_activation_failure_does_not_launch_or_start_unmanaged_session(self):
+        missing = dbus.exceptions.DBusException(
+            "no session", name="org.freedesktop.DBus.Error.ServiceUnknown")
+        launch = Mock()
+        with patch.object(app_manager.tools.helpers.ipc, "DBusSessionService", side_effect=missing), \
+                patch.object(app_manager, "start_session", side_effect=RuntimeError("unit failed")), \
+                patch.object(session_manager, "start") as unmanaged:
+            with self.assertRaisesRegex(RuntimeError, "unit failed"):
+                app_manager.maybeLaunchLater(SimpleNamespace(timeout=30), launch)
+        launch.assert_not_called()
+        unmanaged.assert_not_called()
+
+    def test_bus_error_does_not_start_a_session(self):
+        denied = dbus.exceptions.DBusException(
+            "access denied", name="org.freedesktop.DBus.Error.AccessDenied")
+        with patch.object(app_manager.tools.helpers.ipc, "DBusSessionService", side_effect=denied), \
+                patch.object(app_manager, "start_session") as activate:
+            with self.assertRaises(dbus.exceptions.DBusException):
+                app_manager.maybeLaunchLater(SimpleNamespace(timeout=30), Mock())
+        activate.assert_not_called()
+
+    def test_app_and_intent_select_only_the_application(self):
+        args = SimpleNamespace(timeout=30, PACKAGE="org.example.app", ACTION="android.intent.action.VIEW", URI="example:test")
+        for action in (app_manager.launch, app_manager.intent):
+            with self.subTest(action=action.__name__):
+                platform = Mock()
+                platform.getprop.return_value = "true"
+                platform.launchIntent.return_value = args.PACKAGE
+                with patch.object(app_manager, "maybeLaunchLater", side_effect=lambda args, callback: callback()), \
+                        patch.object(app_manager.IPlatform, "get_service", return_value=platform):
+                    action(args)
+                platform.setprop.assert_called_once_with("waydroid.active_apps", args.PACKAGE)
+
+    def test_explicit_show_full_ui_still_selects_android_desktop(self):
+        platform = Mock()
+        with patch.object(app_manager, "maybeLaunchLater", side_effect=lambda args, callback: callback()), \
+                patch.object(app_manager.IPlatform, "get_service", return_value=platform), \
+                patch.object(app_manager.IStatusBarService, "get_service", return_value=None):
+            app_manager.showFullUI(SimpleNamespace(timeout=30))
+        platform.setprop.assert_called_once_with("waydroid.active_apps", "Waydroid")
+        platform.settingsPutString.assert_called_once_with(2, "policy_control", "null*")
+
     def test_existing_session_waits_before_launch(self):
         events = []
         session = Mock()

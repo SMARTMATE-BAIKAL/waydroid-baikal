@@ -7,6 +7,7 @@ import time
 import tools.config
 import tools.helpers.props
 import tools.helpers.ipc
+from tools.helpers.systemd import start_session
 from tools.interfaces import IPlatform
 from tools.interfaces import IStatusBarService
 import dbus
@@ -66,9 +67,9 @@ def maybeLaunchLater(args, launchNow):
         if error.get_dbus_name() not in ("org.freedesktop.DBus.Error.ServiceUnknown",
                                         "org.freedesktop.DBus.Error.NameHasNoOwner"):
             raise
-        logging.error("Starting waydroid session")
-        tools.actions.session_manager.start(args, launchNow, background=False)
-        return
+        logging.info("Starting the Waydroid session service")
+        start_session(args.timeout)
+        session = tools.helpers.ipc.DBusSessionService()
     try:
         tools.helpers.ipc.DBusContainerService().Unfreeze()
     except Exception:
