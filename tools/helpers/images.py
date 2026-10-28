@@ -159,21 +159,16 @@ def make_prop(args, cfg, full_props_path):
             f.write(prop + "\n")
     os.chmod(full_props_path, 0o644)
 
-def mount_rootfs(args, images_dir, session):
+def _mount_rootfs_images(args, images_dir):
     cfg = tools.config.load(args)
     helpers.mount.mount(args, images_dir + "/system.img",
                         tools.config.defaults["rootfs"], umount=True)
     if cfg["waydroid"]["mount_overlays"] == "True":
-        try:
-            helpers.mount.mount_overlay(args, [tools.config.defaults["overlay"],
-                                               tools.config.defaults["rootfs"]],
-                                    tools.config.defaults["rootfs"],
-                                    upper_dir=tools.config.defaults["overlay_rw"] + "/system",
-                                    work_dir=tools.config.defaults["overlay_work"] + "/system")
-        except RuntimeError:
-            cfg["waydroid"]["mount_overlays"] = "False"
-            tools.config.save(args, cfg)
-            logging.warning("Mounting overlays failed. The feature has been disabled.")
+        helpers.mount.mount_overlay(args, [tools.config.defaults["overlay"],
+                                           tools.config.defaults["rootfs"]],
+                                tools.config.defaults["rootfs"],
+                                upper_dir=tools.config.defaults["overlay_rw"] + "/system",
+                                work_dir=tools.config.defaults["overlay_work"] + "/system")
 
     helpers.mount.mount(args, images_dir + "/vendor.img",
                            tools.config.defaults["rootfs"] + "/vendor")
@@ -196,9 +191,31 @@ def mount_rootfs(args, images_dir, session):
             helpers.mount.bind(
                 args, "/vendor/odm", tools.config.defaults["rootfs"] + "/odm_extra")
 
+def prepare_rootfs(args, images_dir):
+    """Mount immutable images and configured overlays without a user session."""
+    rootfs = tools.config.defaults["rootfs"]
+    images_dir = os.path.realpath(images_dir)
+    if (getattr(args, "prepared_rootfs", None) == images_dir
+            and helpers.mount.ismount(rootfs)
+            and helpers.mount.ismount(rootfs + "/vendor")):
+        return
+    if helpers.lxc.status(args, strict=True) != "STOPPED":
+        raise RuntimeError("Cannot prepare Android images while the container is running")
+    try:
+        _mount_rootfs_images(args, images_dir)
+    except Exception:
+        with suppress(Exception):
+            umount_rootfs(args)
+        raise
+    args.prepared_rootfs = images_dir
+
+
+def mount_rootfs(args, images_dir, session):
+    prepare_rootfs(args, images_dir)
     make_prop(args, session, args.work + "/waydroid.prop")
     helpers.mount.bind_file(args, args.work + "/waydroid.prop",
                             tools.config.defaults["rootfs"] + "/vendor/waydroid.prop")
 
 def umount_rootfs(args):
+    args.prepared_rootfs = None
     helpers.mount.umount_all(args, tools.config.defaults["rootfs"])

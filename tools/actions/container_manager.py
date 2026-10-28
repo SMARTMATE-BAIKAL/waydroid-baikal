@@ -11,6 +11,7 @@ from shutil import which
 from tools import helpers
 from tools import services
 from tools import actions
+from tools.helpers.session import notify
 import dbus
 import dbus.service
 import dbus.exceptions
@@ -124,6 +125,11 @@ def start(args):
         logging.error("Container service is already running")
         return
 
+    # Own the bus name before touching shared mounts; a second daemon must not
+    # unmount the rootfs belonging to an existing instance.
+    notify("STATUS=Preparing Android host resources")
+    prepare_host(args)
+    notify("READY=1\nSTATUS=Android host resources are ready")
     mainloop.run()
 
     if initializer.worker_thread is not None:
@@ -150,7 +156,16 @@ def prepare_drivers_once(args):
     ], "666")
     prepared_drivers = True
 
+def prepare_host(args):
+    """Prepare session-independent resources before the desktop is started."""
+    if not actions.initializer.is_initialized(args):
+        return
+    prepare_drivers_once(args)
+    cfg = tools.config.load(args)
+    helpers.images.prepare_rootfs(args, cfg["waydroid"]["images_path"])
+
 def do_start(args, session):
+    tools.config.validate_session_userdata(args, session)
     if not actions.initializer.is_initialized(args):
         raise RuntimeError("Waydroid is not initialized")
 

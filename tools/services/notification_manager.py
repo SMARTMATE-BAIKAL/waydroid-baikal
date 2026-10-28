@@ -47,14 +47,15 @@ def start(args, session):
                 dbus.types.Array(image_data.data, signature = "y")
             ])
         try:
-            return dbus_proxy.Notify(app_name, replaces_id, app_icon, summary, body, actions_flat, hints, expire_timeout)
+            return dbus_proxy.Notify(app_name, replaces_id, app_icon, summary, body,
+                                     actions_flat, hints, expire_timeout, signature="susssasa{sv}i")
         except dbus.DBusException as e:
             logging.warning(f"Failed to post notification: {e}")
             return INotifications.ID_NONE
 
     def closeNotification(notification_id):
         try:
-            dbus_proxy.CloseNotification(notification_id)
+            dbus_proxy.CloseNotification(notification_id, signature="u")
         except dbus.DBusException as e:
             logging.warning(f"Failed to close notification: {e}")
 
@@ -71,8 +72,12 @@ def start(args, session):
             INotifications.add_service(args, registerListener, notify, closeNotification)
 
     try:
-        dbus_proxy = dbus.Interface(dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications"),
-                                    "org.freedesktop.Notifications")
+        # The compositor is ready before the desktop notification provider.
+        # Keep the well-known name without activating or introspecting it, and
+        # follow its owner so notifications also survive a Plasma restart.
+        dbus_proxy = dbus.Interface(dbus.SessionBus().get_object(
+            "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+            introspect=False, follow_name_owner_changes=True), "org.freedesktop.Notifications")
     except dbus.DBusException as e:
         logging.info("Skipping notification manager service because we could not connect to the notifications server: %s", str(e))
         return
@@ -92,6 +97,7 @@ def stop(args):
     stopping = True
     for signal in bus_signals:
         signal.remove()
+    bus_signals.clear()
     try:
         if args.notificationLoop:
             args.notificationLoop.quit()

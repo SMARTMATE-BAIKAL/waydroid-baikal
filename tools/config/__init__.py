@@ -73,6 +73,53 @@ session_defaults["waydroid_data"] = session_defaults["waydroid_user_state"] + "/
 if session_defaults["pulse_runtime_path"] == "None":
     session_defaults["pulse_runtime_path"] = session_defaults["xdg_runtime_dir"] + "/pulse"
 
+
+def _userdata_path(path):
+    # LXC mount entries are whitespace-delimited and must stay on one line.
+    def invalid_characters(value):
+        return any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value)
+
+    if not path or not os.path.isabs(path) or invalid_characters(path):
+        raise ValueError("Configured userdata must be an absolute path without whitespace or control characters")
+    try:
+        resolved = os.path.realpath(path, strict=True)
+    except OSError as error:
+        raise ValueError("Configured userdata directory is unavailable: {}".format(path)) from error
+    if invalid_characters(resolved):
+        raise ValueError("Configured userdata resolves to a path with whitespace or control characters")
+    if resolved == os.path.sep or not os.path.isdir(resolved):
+        raise ValueError("Configured userdata must be an existing directory other than the filesystem root")
+    return resolved
+
+
+def configured_userdata(args, user_id):
+    """Return an explicit userdata mapping from the system configuration."""
+    uid = str(user_id)
+    if not uid.isascii() or not uid.isdecimal() or int(uid) > 0xFFFFFFFF:
+        raise ValueError("Invalid Unix user ID for userdata selection")
+    cfg = load(args)
+    path = cfg.get("userdata", str(int(uid)), raw=True, fallback=None)
+    return _userdata_path(path) if path is not None else None
+
+
+def configure_session(args):
+    """Select Android data without moving the user's desktop integration."""
+    path = configured_userdata(args, session_defaults["user_id"])
+    if path is None:
+        path = session_defaults["waydroid_user_state"] + "/data"
+    session_defaults["waydroid_data"] = path
+
+
+def validate_session_userdata(args, session):
+    """Enforce the system mapping after the D-Bus caller UID was verified."""
+    path = configured_userdata(args, session["user_id"])
+    if path is None:
+        return
+    if _userdata_path(session.get("waydroid_data", "")) != path:
+        raise ValueError("Session userdata does not match the configured directory for this user")
+    session["waydroid_data"] = path
+
+
 channels_defaults = {
     "config_path": "/usr/share/waydroid-extra/channels.cfg",
     "system_channel": "https://ota.waydro.id/system",

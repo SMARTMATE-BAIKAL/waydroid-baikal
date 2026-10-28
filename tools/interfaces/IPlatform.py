@@ -66,21 +66,34 @@ class IPlatform:
 
         return
 
-    def getAppsInfo(self):
+    def getAppsInfo(self, strict=False):
         request = self.client.new_request()
         reply, status = self.client.transact_sync_reply(
             TRANSACTION_getAppsInfo, request)
 
         apps_list = []
-        if status:
+        if status or reply is None:
+            if strict:
+                raise RuntimeError("Failed to retrieve Android applications: Binder transaction failed")
             logging.error("Sending reply failed")
         else:
             reader = reply.init_reader()
-            status, exception = reader.read_int32()
+
+            def read_int32():
+                valid, value = reader.read_int32()
+                if strict and not valid:
+                    raise RuntimeError("Failed to retrieve Android applications: truncated Binder reply")
+                return value
+
+            exception = read_int32()
             if exception == 0:
-                status, apps = reader.read_int32()
+                apps = read_int32()
+                if strict and apps < 0:
+                    raise RuntimeError("Failed to retrieve Android applications: invalid application count")
                 for j in range(apps):
-                    status, has_value = reader.read_int32()
+                    has_value = read_int32()
+                    if strict and has_value not in (0, 1):
+                        raise RuntimeError("Failed to retrieve Android applications: invalid application record")
                     if has_value == 1:
                         appinfo = {
                             "name": reader.read_string16(),
@@ -91,11 +104,20 @@ class IPlatform:
                             "componentClassName": reader.read_string16(),
                             "categories": []
                         }
-                        status, categories = reader.read_int32()
+                        if strict and (not appinfo["packageName"] or appinfo["name"] is None):
+                            raise RuntimeError("Failed to retrieve Android applications: missing application identity")
+                        categories = read_int32()
+                        if strict and categories < 0:
+                            raise RuntimeError("Failed to retrieve Android applications: invalid category count")
                         for i in range(categories):
-                            appinfo["categories"].append(reader.read_string16())
+                            category = reader.read_string16()
+                            if strict and category is None:
+                                raise RuntimeError("Failed to retrieve Android applications: missing category")
+                            appinfo["categories"].append(category)
                         apps_list.append(appinfo)
             else:
+                if strict:
+                    raise RuntimeError("Failed to retrieve Android applications: exception {}".format(exception))
                 logging.error("Failed with code: {}".format(exception))
 
         return apps_list
@@ -295,7 +317,7 @@ class IPlatform:
 
         return None
 
-def get_service(args):
+def get_service(args, wait=True):
     helpers.drivers.loadBinderNodes(args)
     try:
         serviceManager = gbinder.ServiceManager("/dev/" + args.BINDER_DRIVER, args.SERVICE_MANAGER_PROTOCOL, args.BINDER_PROTOCOL)
@@ -303,6 +325,8 @@ def get_service(args):
         serviceManager = gbinder.ServiceManager("/dev/" + args.BINDER_DRIVER)
 
     if not serviceManager.is_present():
+        if not wait:
+            return None
         logging.info("Waiting for binder Service Manager...")
         if not wait_for_manager(serviceManager):
             logging.error("Service Manager never appeared")
@@ -311,6 +335,8 @@ def get_service(args):
     tries = 1000
 
     remote, status = serviceManager.get_service_sync(SERVICE_NAME)
+    if not wait:
+        return IPlatform(remote) if remote else None
     while(not remote):
         if tries > 0:
             logging.warning(

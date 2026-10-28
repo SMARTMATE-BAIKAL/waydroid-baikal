@@ -13,7 +13,7 @@ from gi.repository import GLib
 stopping = False
 
 
-def start(args, session, unlocked_cb=None):
+def start(args, session, unlocked_cb=None, failed_cb=None):
 
     apps_dir = Path(session["xdg_data_home"]) / "applications"
     apps_dir.mkdir(0o700, exist_ok=True)
@@ -131,25 +131,35 @@ def start(args, session, unlocked_cb=None):
         desktop_file.save_to_file(str(desktop_file_path))
 
     def userUnlocked(uid):
-        cfg = tools.config.load(args)
-        logging.info("Android with user {} is ready".format(uid))
-
-        user_migration()
-
-        if cfg["waydroid"]["auto_adb"] == "True":
-            with suppress(RuntimeError):
-                tools.helpers.net.adb_connect(args)
-
-        platformService = IPlatform.get_service(args)
-        if platformService:
-            appsList = platformService.getAppsInfo()
+        if stopping:
+            return
+        try:
+            platformService = IPlatform.get_service(args, wait=False)
+            if platformService is None:
+                raise RuntimeError("Failed to access the Android platform service")
+            # An empty successful response differs from a failed transaction.
+            # Never delete launchers or announce readiness after a failed RPC.
+            appsList = platformService.getAppsInfo(strict=True)
+            if stopping:
+                return
+            user_migration()
             for app in appsList:
                 updateDesktopFile(app)
+            current_apps = {f"waydroid.{app['packageName']}.desktop" for app in appsList}
             for existing in apps_dir.glob("waydroid.*.desktop"):
-                if existing.name not in map(lambda appInfo: f"waydroid.{appInfo['packageName']}.desktop", appsList):
+                if existing.name not in current_apps:
                     existing.unlink()
-        if unlocked_cb:
-            unlocked_cb()
+            cfg = tools.config.load(args)
+            if cfg["waydroid"]["auto_adb"] == "True":
+                with suppress(RuntimeError):
+                    tools.helpers.net.adb_connect(args)
+            logging.info("Android with user {} is ready".format(uid))
+            if unlocked_cb:
+                unlocked_cb()
+        except Exception as error:
+            logging.exception("Failed to prepare the Android user session")
+            if failed_cb:
+                failed_cb(str(error))
 
     def packageStateChanged(mode, packageName, uid):
         platformService = IPlatform.get_service(args)

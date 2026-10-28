@@ -61,15 +61,22 @@ def remove(args):
 
 def maybeLaunchLater(args, launchNow):
     try:
-        tools.helpers.ipc.DBusSessionService()
-        try:
-            tools.helpers.ipc.DBusContainerService().Unfreeze()
-        except Exception:
-            logging.error("Failed to unfreeze container. Trying to launch anyways...")
-        launchNow()
-    except dbus.DBusException:
+        session = tools.helpers.ipc.DBusSessionService()
+    except dbus.DBusException as error:
+        if error.get_dbus_name() not in ("org.freedesktop.DBus.Error.ServiceUnknown",
+                                        "org.freedesktop.DBus.Error.NameHasNoOwner"):
+            raise
         logging.error("Starting waydroid session")
         tools.actions.session_manager.start(args, launchNow, background=False)
+        return
+    try:
+        tools.helpers.ipc.DBusContainerService().Unfreeze()
+    except Exception:
+        logging.error("Failed to unfreeze container. Trying to launch anyways...")
+    # The session owns its D-Bus name while Android is still booting. The
+    # deferred reply is driven by userUnlocked, without readiness polling.
+    session.WaitForReady(timeout=args.timeout)
+    launchNow()
 
 def launch(args):
     def justLaunch():

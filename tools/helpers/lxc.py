@@ -377,11 +377,13 @@ def setup_host_perms(args):
     for filename in copy_list:
         shutil.copy(filename, tools.config.defaults["host_perms"])
 
-def status(args):
+def status(args, strict=False):
     command = ["lxc-info", "-P", tools.config.defaults["lxc"], "-n", "waydroid", "-sH"]
     try:
         return tools.helpers.run.user(args, command, output_return=True).strip()
     except Exception:
+        if strict:
+            raise
         logging.info("Couldn't get LXC status. Assuming STOPPED.")
         return "STOPPED"
 

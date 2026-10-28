@@ -42,6 +42,7 @@ def main():
             args.log = "/tmp/tools.log"
 
         tools_logging.init(args)
+        config.configure_session(args)
 
         dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
         dbus.mainloop.glib.threads_init()
