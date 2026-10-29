@@ -20,8 +20,11 @@ has a bounded timeout and restart budget, so an Android failure does not prevent
 access to the Linux desktop. An already initialized Android image
 is required; installing this package never replaces images or user data.
 
-The existing Baikal HWC, Android Mesa, touch-device allowlist, and hardware video
-decoder integration are independent components and must be retained.
+The existing Baikal HWC, Android Mesa and hardware video decoder integration
+are independent components and must be retained. Input travels only through the
+native Wayland HWC FIFOs; physical host input nodes stay outside the container.
+Waydroid core publishes the device policy before every LXC start and migrates
+existing configuration away from the retired input synchronization mount hook.
 
 ## Persistent Android data
 

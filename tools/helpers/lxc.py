@@ -28,6 +28,32 @@ def write_input_cgroup_config(path):
     temporary.write_text("\n".join(lines) + "\n", encoding="ascii")
     os.replace(temporary, path)
 
+def ensure_input_config(lxc_path):
+    """Migrate existing containers and publish policy before each LXC start."""
+    directory = Path(lxc_path)
+    config = directory / "config"
+    original = config.read_text(encoding="utf-8")
+    policy = directory / "config_input_devices"
+    write_input_cgroup_config(policy)
+    lines = []
+    for line in original.splitlines():
+        key, separator, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if separator and (
+            (key == "lxc.include" and value == str(policy)) or
+            (key == "lxc.hook.mount" and value == "/usr/local/lib/waydroid-sync-input-devices")
+        ):
+            continue
+        lines.append(line)
+    # Place the authoritative default-deny policy after legacy inline rules.
+    lines.append("lxc.include = " + str(policy))
+    updated = "\n".join(lines) + "\n"
+    if updated != original:
+        temporary = config.with_suffix(".tmp")
+        temporary.write_text(updated, encoding="utf-8")
+        temporary.chmod(stat.S_IMODE(config.stat().st_mode))
+        os.replace(temporary, config)
+
 def get_lxc_version(args):
     if shutil.which("lxc-info") is not None:
         command = ["lxc-info", "--version"]
@@ -419,6 +445,7 @@ def wait_for_running(args):
         raise OSError("container failed to start")
 
 def start(args):
+    ensure_input_config(Path(tools.config.defaults["lxc"]) / "waydroid")
     command = ["lxc-start", "-P", tools.config.defaults["lxc"],
                "-F", "-n", "waydroid", "--", "/init"]
     tools.helpers.run.user(args, command, output="background")
