@@ -54,6 +54,28 @@ def ensure_input_config(lxc_path):
         temporary.chmod(stat.S_IMODE(config.stat().st_mode))
         os.replace(temporary, config)
 
+def ensure_graphics_node_config(args, lxc_path):
+    """Keep existing device configuration while adopting native DRM mounts."""
+    render, _ = tools.helpers.gpu.getDriNode(args)
+    if not render:
+        return
+    config = Path(lxc_path) / "config_nodes"
+    original = config.read_text(encoding="utf-8")
+    destination = render.lstrip("/")
+    for line in original.splitlines():
+        key, separator, value = line.partition("=")
+        fields = value.split()
+        if separator and key.strip() == "lxc.mount.entry" and len(fields) >= 2:
+            if fields[0] == render and fields[1] == destination:
+                return
+    entries = []
+    add_node_entry(entries, render, destination, "none", "bind,create=file 0 0", True)
+    if entries:
+        temporary = config.with_suffix(".tmp")
+        temporary.write_text(original.rstrip("\n") + "\n" + "\n".join(entries) + "\n", encoding="utf-8")
+        temporary.chmod(stat.S_IMODE(config.stat().st_mode))
+        os.replace(temporary, config)
+
 def get_lxc_version(args):
     if shutil.which("lxc-info") is not None:
         command = ["lxc-info", "--version"]
@@ -445,6 +467,7 @@ def wait_for_running(args):
         raise OSError("container failed to start")
 
 def start(args):
+    ensure_graphics_node_config(args, Path(tools.config.defaults["lxc"]) / "waydroid")
     ensure_input_config(Path(tools.config.defaults["lxc"]) / "waydroid")
     command = ["lxc-start", "-P", tools.config.defaults["lxc"],
                "-F", "-n", "waydroid", "--", "/init"]

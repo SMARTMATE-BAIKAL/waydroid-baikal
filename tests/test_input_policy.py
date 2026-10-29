@@ -4,6 +4,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from tools.helpers import lxc
 
@@ -59,6 +60,34 @@ class InputPolicyTests(unittest.TestCase):
             lxc.ensure_input_config(root)
             self.assertNotIn("devices.allow = a", policy.read_text())
             self.assertNotIn(" c 13:", policy.read_text())
+
+    def test_legacy_graphics_nodes_gain_a_native_drm_mount(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "config_nodes"
+            preserved = "lxc.mount.entry = tmpfs sys/kernel/debug tmpfs nosuid,nodev 0 0\n"
+            config.write_text(preserved)
+            with (
+                patch.object(lxc.tools.helpers.gpu, "getDriNode", return_value=("/dev/dri/renderD128", "/dev/dri/card0")),
+                patch.object(lxc.os.path, "exists", return_value=True),
+            ):
+                lxc.ensure_graphics_node_config(None, root)
+                result = config.read_text()
+                self.assertTrue(result.startswith(preserved))
+                self.assertIn("/dev/dri/renderD128 dev/dri/renderD128 none bind,create=file 0 0", result)
+                inode = config.stat().st_ino
+                lxc.ensure_graphics_node_config(None, root)
+                self.assertEqual(config.stat().st_ino, inode)
+                self.assertEqual(config.read_text(), result)
+
+    def test_no_selected_drm_node_does_not_change_configuration(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "config_nodes"
+            config.write_text("original device configuration\n")
+            with patch.object(lxc.tools.helpers.gpu, "getDriNode", return_value=("", "")):
+                lxc.ensure_graphics_node_config(None, root)
+            self.assertEqual(config.read_text(), "original device configuration\n")
 
 
 if __name__ == "__main__":
