@@ -1,0 +1,33 @@
+pkgbase = waydroid-baikal
+	pkgdesc = Android application integration with native Baikal session lifecycle
+	pkgver = 1.6.3
+	pkgrel = 7
+	url = https://github.com/SMARTMATE-BAIKAL/waydroid-baikal
+	install = waydroid-baikal.install
+	arch = any
+	license = GPL-3.0-or-later
+	makedepends = git
+	depends = lxc
+	depends = python
+	depends = python-gbinder>=1.3.0
+	depends = python-gobject
+	depends = nftables
+	depends = dnsmasq
+	depends = gtk3
+	depends = python-dbus
+	depends = pulse-native-provider
+	depends = systemd
+	optdepends = python-pyclip: clipboard manager support
+	provides = waydroid=1.6.3
+	conflicts = waydroid
+	replaces = waydroid
+	source = waydroid::git+https://github.com/SMARTMATE-BAIKAL/waydroid-baikal.git#commit=738f89fb7f209e0c7b4cd8c937dd3f088106d0c5
+	source = waydroid-session.service
+	source = 25-baikal-resources.conf
+	source = README.md
+	sha256sums = SKIP
+	sha256sums = e31949ecad66e935d2aff3f799566606485b47367113f3f99cb5f5546fc8b30e
+	sha256sums = 6685d391fde0fad003ff394bd1953e627a3401a6e4d5d1ed44ec59b066fe3037
+	sha256sums = 0ce903fd6a007fd4150776898b3dc37603a66e0abfb7dce1e374dee1ae85f925
+
+pkgname = waydroid-baikal
