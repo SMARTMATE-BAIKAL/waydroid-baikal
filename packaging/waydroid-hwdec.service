@@ -1,0 +1,24 @@
+# Maintainer: Timofei Granovskii <t.stifix@gmail.com>
+[Unit]
+Description=Waydroid host VAAPI H.264 decoder
+Before=waydroid-container.service
+
+[Service]
+Type=simple
+Environment=LIBVA_DRIVER_NAME=radeonsi
+Environment=WHD_VAAPI_DEVICE=/dev/dri/renderD128
+RuntimeDirectory=waydroid/hwdec
+RuntimeDirectoryMode=0755
+ExecStart=/usr/lib/waydroid/waydroid-hwdec-helper /run/waydroid/hwdec/decoder.sock
+Restart=on-failure
+RestartSec=1
+Nice=-10
+CPUSchedulingPolicy=rr
+CPUSchedulingPriority=2
+CPUWeight=1000
+IOWeight=1000
+IOSchedulingClass=best-effort
+IOSchedulingPriority=0
+
+[Install]
+WantedBy=multi-user.target

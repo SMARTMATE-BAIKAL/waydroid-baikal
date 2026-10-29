@@ -1,14 +1,16 @@
 # Maintainer: Timofei Granovskii <t.stifix@gmail.com>
 pkgname=waydroid-baikal
 pkgver=1.6.3
-pkgrel=9
+pkgrel=12
 pkgdesc='Integrated Baikal Waydroid with matched Android runtime and native Wayland input'
 arch=('aarch64')
 url='https://github.com/SMARTMATE-BAIKAL/waydroid-baikal'
 license=('GPL-3.0-or-later' 'Apache-2.0' 'MIT')
 depends=('lxc' 'python' 'python-gbinder>=1.3.0' 'python-gobject' 'nftables'
-         'dnsmasq' 'gtk3' 'python-dbus' 'pulse-native-provider' 'systemd')
-makedepends=('git')
+         'dnsmasq' 'gtk3' 'python-dbus' 'pulse-native-provider' 'systemd'
+         'libavfilter.so' 'libavcodec.so' 'libavutil.so' 'libswscale.so'
+         'libva.so' 'libva-drm.so')
+makedepends=('git' 'gcc' 'pkgconf')
 optdepends=('python-pyclip: clipboard manager support')
 provides=("waydroid=$pkgver" 'waydroid-android-runtime=13.20261028'
           'waydroid-android-runtime-baikal=13.20261028-4')
@@ -19,23 +21,46 @@ install=waydroid-baikal.install
 _commit=0a35ff050408a940539ca5101613844cef81c114
 _runtime_payload=waydroid-android-runtime-20261028.tar.zst
 _runtime_sha256=9efdd249ae4e92b325853da0ef35a8422e46990f22dd368a084b33751202084d
+_hwdec_commit=f29b7b0a3173c0d87b5774e7dadeaeaea5171401
+_hwdec_source=waydroid-hwdec-source-f29b7b0a3173.tar.zst
+_hwdec_sha256=868a31b528394f83e3a256e85e117cc87149a5e6cc00cb756538d87abadc1d7d
 source=("waydroid::git+${WAYDROID_SOURCE_URL:-https://github.com/SMARTMATE-BAIKAL/waydroid-baikal.git}#commit=$_commit"
         'waydroid-session.service'
         '25-baikal-resources.conf'
         'README.md'
-        "$_runtime_payload")
+        "$_runtime_payload"
+        "$_hwdec_source"
+        'waydroid-hwdec.service'
+        '60-hwdec-runtime-dir.conf'
+        'check-host-decoder.py'
+        'check-install-migration.py')
 noextract=("$_runtime_payload")
 sha256sums=('SKIP'
-            'e31949ecad66e935d2aff3f799566606485b47367113f3f99cb5f5546fc8b30e'
+            '2be041182c9ad117f5392f20cbbae8a0750edaddc62f4dbb41e82f39c7d9b8d9'
             '6685d391fde0fad003ff394bd1953e627a3401a6e4d5d1ed44ec59b066fe3037'
-            'd13346db79c5b4bd49bea4b3b8b184366a902386a183548d4fee06bbb273859d'
-            "$_runtime_sha256")
+            'd15b6fb70b56a6189a2593679b75320ab3672b032d6029d5a2a8e70ab3e77bc5'
+            "$_runtime_sha256"
+            "$_hwdec_sha256"
+            '59c4444cac583130d29f5a69f9e0805b25ee4fcbfb4b85b27007df66dbdc27cb'
+            '9380aa5e0a80bcea3cd38533d77e8d42948e01107d9a8341dc0b517d60736223'
+            '1c38456eafb669b7396a09f0c7cee6ecaacab3fb115bda3604044871d2b2fc6b'
+            '2ec49f6541db42262b2dad31128c2d4425f14571e749e81330b82086ed113a0f')
+
+build() {
+    c++ -std=c++17 -march=armv8-a -mtune=cortex-a57 -O2 -fno-lto \
+        -fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=3 \
+        "$srcdir/waydroid-hwdec-source/src/host_vaapi_h264d.cpp" \
+        -o "$srcdir/waydroid-hwdec-helper" -pthread -pie -Wl,-z,relro,-z,now \
+        $(pkg-config --cflags --libs libavfilter libavcodec libavutil libswscale libva libva-drm)
+}
 
 check() {
     cd "$srcdir/waydroid"
     WAYDROID_TEST_PRIVATE_BUS=1 dbus-run-session -- python -m unittest discover -s tests -v
     python -m unittest discover -s android-runtime -v
     python android-runtime/check-runtime-payload.py "$srcdir/$_runtime_payload"
+    python "$srcdir/check-host-decoder.py" "$srcdir/waydroid-hwdec-helper"
+    python "$srcdir/check-install-migration.py" "$startdir/waydroid-baikal.install"
 }
 
 package() {
@@ -49,6 +74,14 @@ package() {
         "$pkgdir/usr/lib/systemd/user/waydroid-session.service"
     install -Dm644 "$srcdir/25-baikal-resources.conf" \
         "$pkgdir/usr/lib/systemd/system/waydroid-container.service.d/25-baikal-resources.conf"
+    install -Dm755 "$srcdir/waydroid-hwdec-helper" \
+        "$pkgdir/usr/lib/waydroid/waydroid-hwdec-helper"
+    install -Dm644 "$srcdir/waydroid-hwdec.service" \
+        "$pkgdir/usr/lib/systemd/system/waydroid-hwdec.service"
+    install -Dm644 "$srcdir/60-hwdec-runtime-dir.conf" \
+        "$pkgdir/usr/lib/systemd/system/waydroid-container.service.d/60-hwdec-runtime-dir.conf"
+    install -d "$pkgdir/usr/share/waydroid-baikal/hwdec"
+    printf '%s\n' "$_hwdec_commit" > "$pkgdir/usr/share/waydroid-baikal/hwdec/source-revision"
 
     # Distribution policy: start Android alongside the desktop automatically.
     install -d "$pkgdir/usr/lib/systemd/user/plasma-workspace-wayland.target.wants"
@@ -57,6 +90,8 @@ package() {
     install -d "$pkgdir/usr/lib/systemd/system/multi-user.target.wants"
     ln -s ../waydroid-container.service \
         "$pkgdir/usr/lib/systemd/system/multi-user.target.wants/waydroid-container.service"
+    ln -s ../waydroid-hwdec.service \
+        "$pkgdir/usr/lib/systemd/system/multi-user.target.wants/waydroid-hwdec.service"
     install -Dm644 "$srcdir/README.md" \
         "$pkgdir/usr/share/doc/waydroid-baikal/README.md"
 }

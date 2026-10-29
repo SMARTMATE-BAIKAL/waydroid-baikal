@@ -25,17 +25,42 @@ _migrate_launchers() {
     done
 }
 
+_migrate_legacy_input_config() {
+    local config=${1:-/var/lib/waydroid/lxc/waydroid/config}
+    if [ -f "$config" ]; then
+        # Native core owns the device policy and its include. Retire only the
+        # obsolete mount hook without weakening the current device allowlist.
+        sed -i \
+            -e '\#^[[:space:]]*lxc\.hook\.mount[[:space:]]*=[[:space:]]*/usr/local/lib/waydroid-sync-input-devices[[:space:]]*$#d' \
+            "$config"
+    fi
+}
+
 _migrate_legacy_services() {
     local unit link
+    _remove_known_file /etc/systemd/system/waydroid-hwdec.service \
+        2082bbf646618671b60c3130240ec797bec3ab5225f68625ff157278e94be214
+    _remove_known_file /usr/local/bin/waydroid-hwdec-helper \
+        2da015966d157877b52c00931ec9ca16186afd5f509367f1c781bbefefe70641
+    _remove_known_file /etc/systemd/system/waydroid-container.service.d/60-hwdec-runtime-dir.conf \
+        bd8daa1903370ed84fdad2c01feee4590626f1d990df7a1255e6f03a0d9a6777
+    _remove_known_file /etc/systemd/system/waydroid-container.service.d/20-touch-controls.conf \
+        0db8ec222d770018e441037c9803c569630b24284368057d13a1268987cb6f9b
+    link=/etc/systemd/system/multi-user.target.wants/waydroid-hwdec.service
+    if [ -L "$link" ] && [ ! -e /etc/systemd/system/waydroid-hwdec.service ]; then
+        case $(readlink "$link") in
+            /etc/systemd/system/waydroid-hwdec.service|../waydroid-hwdec.service)
+                rm -- "$link"
+                ;;
+        esac
+    fi
     for unit in /etc/systemd/user/waydroid-session.service \
                 /etc/xdg/systemd/user/waydroid-session.service; do
         _remove_known_file "$unit" 9f3d17753e6860446ad36aebad993691bbae18742125f596f1a78789e42a10a1
     done
 
-    # These old targets run before the compositor imports its environment.
-    for link in /home/*/.config/systemd/user/default.target.wants/waydroid-session.service \
-                /home/*/.config/systemd/user/graphical-session-pre.target.wants/waydroid-session.service \
-                /etc/systemd/user/default.target.wants/waydroid-session.service \
+    # Retire system-wide links without modifying users' home directories.
+    for link in /etc/systemd/user/default.target.wants/waydroid-session.service \
                 /etc/systemd/user/graphical-session-pre.target.wants/waydroid-session.service; do
         [ -L "$link" ] || continue
         case $(readlink "$link") in
@@ -107,18 +132,7 @@ _migrate_legacy_services() {
     _remove_known_file /etc/systemd/system/waydroid-container.service.d/50-input-sync-post.conf \
         b13c4be66cd91625b259b367e6f427db07eaf431e4a4402383bb0d8a8ff85a15
 
-    # The native HWC owns the input FIFOs. Remove the retired mount hook from
-    # an already-generated live LXC config before the old helper is deleted.
-    local config=/var/lib/waydroid/lxc/waydroid/config
-    if [ -f "$config" ]; then
-        sed -i \
-            -e '\#^[[:space:]]*lxc\.hook\.version[[:space:]]*=[[:space:]]*1[[:space:]]*$#d' \
-            -e '\#^[[:space:]]*lxc\.hook\.mount[[:space:]]*=[[:space:]]*/usr/local/lib/waydroid-sync-input-devices[[:space:]]*$#d' \
-            -e '\#^[[:space:]]*lxc\.include[[:space:]]*=[[:space:]]*/var/lib/waydroid/lxc/waydroid/config_input_devices[[:space:]]*$#d' \
-            "$config"
-    fi
-    _remove_known_file /var/lib/waydroid/lxc/waydroid/config_input_devices \
-        aa008244a3868fb28e7c6a764556795e7ae62259261118de709899d8afffd331
+    _migrate_legacy_input_config
 
 }
 

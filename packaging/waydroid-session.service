@@ -21,7 +21,6 @@ RestartSec=5s
 TimeoutStartSec=120s
 TimeoutStopSec=20s
 Slice=app.slice
-Environment=WAYDROID_TOUCH_CONTROLS=0
 
 [Install]
 WantedBy=plasma-workspace-wayland.target
