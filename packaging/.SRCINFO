@@ -1,7 +1,7 @@
 pkgbase = waydroid-baikal
 	pkgdesc = Android application integration with native Baikal session lifecycle
 	pkgver = 1.6.3
-	pkgrel = 5
+	pkgrel = 6
 	url = https://github.com/SMARTMATE-BAIKAL/waydroid-baikal
 	install = waydroid-baikal.install
 	arch = any
@@ -21,7 +21,7 @@ pkgbase = waydroid-baikal
 	provides = waydroid=1.6.3
 	conflicts = waydroid
 	replaces = waydroid
-	source = waydroid::git+https://github.com/SMARTMATE-BAIKAL/waydroid-baikal.git#commit=632f6b5646367e50ed050bc4392d1253fdd9784e
+	source = waydroid::git+https://github.com/SMARTMATE-BAIKAL/waydroid-baikal.git#commit=f9bbbe44c86ee3f61f4f390999f0c2744b824a01
 	source = waydroid-session.service
 	source = 25-baikal-resources.conf
 	source = README.md
