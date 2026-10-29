@@ -1,37 +1,47 @@
 # Maintainer: Timofei Granovskii <t.stifix@gmail.com>
 pkgname=waydroid-baikal
 pkgver=1.6.3
-pkgrel=8
-pkgdesc='Android application integration with native Baikal session lifecycle'
-arch=('any')
+pkgrel=9
+pkgdesc='Integrated Baikal Waydroid with matched Android runtime and native Wayland input'
+arch=('aarch64')
 url='https://github.com/SMARTMATE-BAIKAL/waydroid-baikal'
-license=('GPL-3.0-or-later')
+license=('GPL-3.0-or-later' 'Apache-2.0' 'MIT')
 depends=('lxc' 'python' 'python-gbinder>=1.3.0' 'python-gobject' 'nftables'
          'dnsmasq' 'gtk3' 'python-dbus' 'pulse-native-provider' 'systemd')
 makedepends=('git')
 optdepends=('python-pyclip: clipboard manager support')
-provides=("waydroid=$pkgver")
-conflicts=('waydroid')
-replaces=('waydroid')
+provides=("waydroid=$pkgver" 'waydroid-android-runtime=13.20261028'
+          'waydroid-android-runtime-baikal=13.20261028-4')
+conflicts=('waydroid' 'waydroid-android-runtime-baikal')
+replaces=('waydroid' 'waydroid-android-runtime-baikal')
+options=('!strip' '!debug')
 install=waydroid-baikal.install
-_commit=2a83ea52d0036886db4f1bc62ba553c91928aa24
+_commit=4e4aae999c8ce5189562ed0cb0544b160b64b540
+_runtime_payload=waydroid-android-runtime-20261028.tar.zst
+_runtime_sha256=9efdd249ae4e92b325853da0ef35a8422e46990f22dd368a084b33751202084d
 source=("waydroid::git+${WAYDROID_SOURCE_URL:-https://github.com/SMARTMATE-BAIKAL/waydroid-baikal.git}#commit=$_commit"
         'waydroid-session.service'
         '25-baikal-resources.conf'
-        'README.md')
+        'README.md'
+        "$_runtime_payload")
+noextract=("$_runtime_payload")
 sha256sums=('SKIP'
             'e31949ecad66e935d2aff3f799566606485b47367113f3f99cb5f5546fc8b30e'
             '6685d391fde0fad003ff394bd1953e627a3401a6e4d5d1ed44ec59b066fe3037'
-            '0ce903fd6a007fd4150776898b3dc37603a66e0abfb7dce1e374dee1ae85f925')
+            'd13346db79c5b4bd49bea4b3b8b184366a902386a183548d4fee06bbb273859d'
+            "$_runtime_sha256")
 
 check() {
     cd "$srcdir/waydroid"
     WAYDROID_TEST_PRIVATE_BUS=1 dbus-run-session -- python -m unittest discover -s tests -v
+    python -m unittest discover -s android-runtime -v
+    python android-runtime/check-runtime-payload.py "$srcdir/$_runtime_payload"
 }
 
 package() {
     cd "$srcdir/waydroid"
     make DESTDIR="$pkgdir" USE_NFTABLES=1 install
+    bsdtar -xpf "$srcdir/$_runtime_payload" -C "$pkgdir"
     python -m compileall -q -f -o 0 -o 1 \
         -d /usr/lib/waydroid "$pkgdir/usr/lib/waydroid"
 

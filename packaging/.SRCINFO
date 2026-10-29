@@ -1,11 +1,13 @@
 pkgbase = waydroid-baikal
-	pkgdesc = Android application integration with native Baikal session lifecycle
+	pkgdesc = Integrated Baikal Waydroid with matched Android runtime and native Wayland input
 	pkgver = 1.6.3
-	pkgrel = 8
+	pkgrel = 9
 	url = https://github.com/SMARTMATE-BAIKAL/waydroid-baikal
 	install = waydroid-baikal.install
-	arch = any
+	arch = aarch64
 	license = GPL-3.0-or-later
+	license = Apache-2.0
+	license = MIT
 	makedepends = git
 	depends = lxc
 	depends = python
@@ -19,15 +21,24 @@ pkgbase = waydroid-baikal
 	depends = systemd
 	optdepends = python-pyclip: clipboard manager support
 	provides = waydroid=1.6.3
+	provides = waydroid-android-runtime=13.20261028
+	provides = waydroid-android-runtime-baikal=13.20261028-4
 	conflicts = waydroid
+	conflicts = waydroid-android-runtime-baikal
 	replaces = waydroid
-	source = waydroid::git+https://github.com/SMARTMATE-BAIKAL/waydroid-baikal.git#commit=2a83ea52d0036886db4f1bc62ba553c91928aa24
+	replaces = waydroid-android-runtime-baikal
+	noextract = waydroid-android-runtime-20261028.tar.zst
+	options = !strip
+	options = !debug
+	source = waydroid::git+https://github.com/SMARTMATE-BAIKAL/waydroid-baikal.git#commit=4e4aae999c8ce5189562ed0cb0544b160b64b540
 	source = waydroid-session.service
 	source = 25-baikal-resources.conf
 	source = README.md
+	source = waydroid-android-runtime-20261028.tar.zst
 	sha256sums = SKIP
 	sha256sums = e31949ecad66e935d2aff3f799566606485b47367113f3f99cb5f5546fc8b30e
 	sha256sums = 6685d391fde0fad003ff394bd1953e627a3401a6e4d5d1ed44ec59b066fe3037
-	sha256sums = 0ce903fd6a007fd4150776898b3dc37603a66e0abfb7dce1e374dee1ae85f925
+	sha256sums = d13346db79c5b4bd49bea4b3b8b184366a902386a183548d4fee06bbb273859d
+	sha256sums = 9efdd249ae4e92b325853da0ef35a8422e46990f22dd368a084b33751202084d
 
 pkgname = waydroid-baikal

@@ -20,8 +20,9 @@ has a bounded timeout and restart budget, so an Android failure does not prevent
 access to the Linux desktop. An already initialized Android image
 is required; installing this package never replaces images or user data.
 
-The existing Baikal HWC, Android Mesa and hardware video decoder integration
-are independent components and must be retained. Input travels only through the
+The matched ART/framework, InputReader for both Android ABIs and Baikal HWC are
+included in this package. Android Mesa and the optional EShare hardware video
+decoder integration remain independent and are retained. Input travels only through the
 native Wayland HWC FIFOs; physical host input nodes stay outside the container.
 Waydroid core publishes the device policy before every LXC start and migrates
 existing configuration away from the retired input synchronization mount hook.
@@ -44,10 +45,21 @@ D-Bus caller.
 
 ## Build and migration
 
-Run `makepkg` from this directory. The source revision is pinned; a local source
+First build and verify the matched payload using `../android-runtime/README.md`.
+The packer publishes the source archive in this directory and updates its SHA256
+in the existing PKGBUILD. Run `makepkg --config "$PWD/makepkg.conf"` from this
+directory. The source revision is pinned; a local source
 URL can be supplied with `WAYDROID_SOURCE_URL=file:///path/to/waydroid-baikal`.
-The package replaces the stock `waydroid` provider. The menu package uses this
-native service provider explicitly.
+The package replaces both stock `waydroid` and the retired standalone
+`waydroid-android-runtime-baikal` package. Conflicts and compatibility provides
+allow pacman to remove the old runtime and transfer all runtime file ownership
+within one transaction. The menu package uses this native service provider
+explicitly. No broad overwrite is required.
+
+The build runs the host integration tests, runtime tooling tests and a complete
+payload hash/provenance check. Stripping and debug splitting are disabled so the
+verified Android artifacts remain byte-identical. Installed verification metadata
+is available in `/usr/share/waydroid-baikal/android-runtime/`.
 
 The package install transaction converts old global launcher commands and removes
 the known obsolete session keepers, warmup unit and manual cgroup controller writes.
