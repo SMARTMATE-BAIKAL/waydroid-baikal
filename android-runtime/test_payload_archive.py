@@ -4,9 +4,12 @@ Maintainer: Timofei Granovskii <t.stifix@gmail.com>
 """
 
 import importlib.util
+import hashlib
 import io
 from pathlib import Path
+import subprocess
 import tarfile
+import tempfile
 import unittest
 
 SPEC = importlib.util.spec_from_file_location("payload_checker", Path(__file__).with_name("check-runtime-payload.py"))
@@ -15,6 +18,28 @@ SPEC.loader.exec_module(CHECKER)
 
 
 class PayloadArchiveTests(unittest.TestCase):
+    def test_makepkg_source_symlink_is_decompressed(self):
+        name = CHECKER.METADATA + "fixture.json"
+        payload = b'{"fixture": true}\n'
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as archive:
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "payload.tar.zst"
+            compressed = subprocess.run(
+                ["zstd", "-q", "-c"], input=buffer.getvalue(),
+                capture_output=True, check=True,
+            ).stdout
+            source.write_bytes(compressed)
+            link = root / "source.tar.zst"
+            link.symlink_to(source)
+            hashes, metadata = CHECKER.read_archive(link)
+        self.assertEqual(hashes, {name: hashlib.sha256(payload).hexdigest()})
+        self.assertEqual(metadata, {"fixture.json": payload})
+
     def scan(self, members):
         output = io.BytesIO()
         with tarfile.open(fileobj=output, mode="w") as archive:

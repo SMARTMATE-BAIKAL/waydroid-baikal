@@ -87,6 +87,21 @@ def validate_generation(hashes, metadata, expected):
     return {"runtime_files": len(actual), "abis": ["arm", "arm64"], "matched_hwc": hwc["source_commit"]}
 
 
+def read_archive(path):
+    # makepkg exposes local sources through symlinks, which zstd skips by default.
+    source = Path(path).resolve(strict=True)
+    process = subprocess.Popen(["zstd", "-q", "-d", "-c", str(source)], stdout=subprocess.PIPE)
+    try:
+        with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
+            hashes, metadata = scan_archive(archive)
+    finally:
+        process.stdout.close()
+        status = process.wait()
+    if status:
+        raise ValueError("Runtime payload decompression failed")
+    return hashes, metadata
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
@@ -97,15 +112,7 @@ def main():
         if name in expected:
             raise ValueError("Duplicate runtime manifest entry")
         expected[name] = checksum
-    process = subprocess.Popen(["zstd", "-q", "-d", "-c", str(args.archive)], stdout=subprocess.PIPE)
-    try:
-        with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
-            hashes, metadata = scan_archive(archive)
-    finally:
-        process.stdout.close()
-        status = process.wait()
-    if status:
-        raise ValueError("Runtime payload decompression failed")
+    hashes, metadata = read_archive(args.archive)
     print(json.dumps(validate_generation(hashes, metadata, expected), indent=2))
 
 
