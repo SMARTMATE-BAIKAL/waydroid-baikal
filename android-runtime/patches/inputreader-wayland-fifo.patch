@@ -1,0 +1,813 @@
+diff --git a/services/inputflinger/reader/EventHub.cpp b/services/inputflinger/reader/EventHub.cpp
+index 1b58284..c489ee0 100644
+--- a/services/inputflinger/reader/EventHub.cpp
++++ b/services/inputflinger/reader/EventHub.cpp
+@@ -410,7 +410,7 @@ const std::shared_ptr<KeyCharacterMap> EventHub::Device::getKeyCharacterMap() co
+ 
+ template <std::size_t N>
+ status_t EventHub::Device::readDeviceBitMask(unsigned long ioctlCode, BitArray<N>& bitArray) {
+-    if (!hasValidFd()) {
++    if (!hasValidFd() || isWayland()) {
+         return BAD_VALUE;
+     }
+     if ((_IOC_SIZE(ioctlCode) == 0)) {
+@@ -424,6 +424,12 @@ status_t EventHub::Device::readDeviceBitMask(unsigned long ioctlCode, BitArray<N
+ }
+ 
+ void EventHub::Device::configureFd() {
++    if (isWayland()) {
++        // The Wayland endpoints are FIFOs.  EVIOCSREP and EVIOCSCLOCKID are
++        // evdev ioctls and would only produce ENOTTY/EPERM on these streams.
++        return;
++    }
++
+     // Set fd parameters with ioctl, such as key repeat, suspend block, and clock type
+     if (classes.test(InputDeviceClass::KEYBOARD)) {
+         // Disable kernel key repeat since we handle it ourselves
+@@ -672,6 +678,28 @@ static void ensureProcessCanBlockSuspend() {
+ 
+ const int EventHub::EPOLL_MAX_EVENTS;
+ 
++enum {
++    WL_INPUT_TOUCH,
++    WL_INPUT_KEYBOARD,
++    WL_INPUT_POINTER,
++    WL_INPUT_TABLET,
++    WL_INPUT_TOTAL
++};
++
++static const char *INPUT_PIPE_NAME[WL_INPUT_TOTAL] = {
++    "/dev/input/wl_touch_events",
++    "/dev/input/wl_keyboard_events",
++    "/dev/input/wl_pointer_events",
++    "/dev/input/wl_tablet_events"
++};
++
++static const char *INPUT_TYPE_NAME[WL_INPUT_TOTAL] = {
++    "wayland_touch",
++    "wayland_keyboard",
++    "wayland_pointer",
++    "wayland_tablet"
++};
++
+ EventHub::EventHub(void)
+       : mBuiltInKeyboardId(NO_BUILT_IN_KEYBOARD),
+         mNextDeviceId(1),
+@@ -798,11 +826,54 @@ status_t EventHub::getAbsoluteAxisInfo(int32_t deviceId, int axis,
+ 
+         Device* device = getDeviceLocked(deviceId);
+         if (device != nullptr && device->hasValidFd() && device->absBitmask.test(axis)) {
+-            struct input_absinfo info;
+-            if (ioctl(device->fd, EVIOCGABS(axis), &info)) {
+-                ALOGW("Error reading absolute controller %d for device %s fd %d, errno=%d", axis,
+-                      device->identifier.name.c_str(), device->fd, errno);
+-                return -errno;
++            struct input_absinfo info {};
++            if (!device->isWayland()) {
++                if (ioctl(device->fd, EVIOCGABS(axis), &info)) {
++                    ALOGW("Error reading absolute controller %d for device %s fd %d, errno=%d", axis,
++                          device->identifier.name.c_str(), device->fd, errno);
++                    return -errno;
++                }
++            } else {
++                // HWC reports display-pixel coordinates through the FIFO.
++                switch (axis) {
++                    case ABS_MT_POSITION_X:
++                    case ABS_X:
++                        info.maximum = property_get_int32("waydroid.display_width", 0);
++                        break;
++                    case ABS_MT_POSITION_Y:
++                    case ABS_Y:
++                        info.maximum = property_get_int32("waydroid.display_height", 0);
++                        break;
++                    case ABS_MT_SLOT:
++                        info.maximum = 9;
++                        break;
++                    case ABS_PRESSURE:
++                    case ABS_MT_PRESSURE:
++                    case ABS_DISTANCE:
++                        info.maximum = 255;
++                        break;
++                    case ABS_MT_TRACKING_ID:
++                        info.maximum = 65535;
++                        break;
++                    case ABS_MT_TOUCH_MAJOR:
++                    case ABS_MT_TOUCH_MINOR:
++                        info.maximum = 15;
++                        break;
++                    case ABS_MT_ORIENTATION:
++                        info.maximum = 1;
++                        break;
++                    case ABS_TILT_X:
++                    case ABS_TILT_Y:
++                        info.minimum = -90;
++                        info.maximum = 90;
++                        break;
++                    default:
++                        return BAD_VALUE;
++                }
++                if (info.maximum <= info.minimum) {
++                    return BAD_VALUE;
++                }
++                info.resolution = 1;
+             }
+ 
+             if (info.minimum != info.maximum) {
+@@ -941,6 +1012,12 @@ status_t EventHub::getAbsoluteAxisValue(int32_t deviceId, int32_t axis, int32_t*
+         Device* device = getDeviceLocked(deviceId);
+         if (device != nullptr && device->hasValidFd() && device->absBitmask.test(axis)) {
+             struct input_absinfo info;
++            if (device->isWayland()) {
++                // Synthetic Wayland devices have no kernel-maintained axis
++                // state.  Mappers start from the protocol's zero coordinate
++                // and consume subsequent ABS events from the FIFO.
++                return OK;
++            }
+             if (ioctl(device->fd, EVIOCGABS(axis), &info)) {
+                 ALOGW("Error reading absolute controller %d for device %s fd %d, errno=%d", axis,
+                       device->identifier.name.c_str(), device->fd, errno);
+@@ -1045,7 +1122,7 @@ base::Result<std::pair<InputDeviceSensorType, int32_t>> EventHub::mapSensor(int3
+     if (device != nullptr && device->keyMap.haveKeyLayout()) {
+         return device->keyMap.keyLayoutMap->mapSensor(absCode);
+     }
+-    return Errorf("Device not found or device has no key layout.");
++    return base::Error() << "Device not found or device has no key layout.";
+ }
+ 
+ // Gets the battery info map from battery ID to RawBatteryInfo of the miscellaneous device
+@@ -1941,6 +2018,9 @@ void EventHub::openDeviceLocked(const std::string& devicePath) {
+     }
+ 
+     char buffer[80];
++    int driverVersion = 0;
++    int inputType = 0;
++    bool isWayland = false;
+ 
+     ALOGV("Opening device: %s", devicePath.c_str());
+ 
+@@ -1950,60 +2030,77 @@ void EventHub::openDeviceLocked(const std::string& devicePath) {
+         return;
+     }
+ 
++    for (inputType = 0; inputType < WL_INPUT_TOTAL; inputType++) {
++        if (devicePath == INPUT_PIPE_NAME[inputType]) {
++            isWayland = true;
++            break;
++        }
++    }
++
+     InputDeviceIdentifier identifier;
+ 
+-    // Get device name.
+-    if (ioctl(fd, EVIOCGNAME(sizeof(buffer) - 1), &buffer) < 1) {
+-        ALOGE("Could not get device name for %s: %s", devicePath.c_str(), strerror(errno));
++    if (isWayland) {
++        identifier.name = INPUT_TYPE_NAME[inputType];
++        identifier.bus = BUS_VIRTUAL;
++        identifier.product = 1;
++        identifier.vendor = 1;
++        identifier.version = 1;
++        identifier.location = "wayland";
++        identifier.uniqueId = INPUT_TYPE_NAME[inputType];
+     } else {
+-        buffer[sizeof(buffer) - 1] = '\0';
+-        identifier.name = buffer;
+-    }
++        // Get device name.
++        if (ioctl(fd, EVIOCGNAME(sizeof(buffer) - 1), &buffer) < 1) {
++            ALOGE("Could not get device name for %s: %s", devicePath.c_str(), strerror(errno));
++        } else {
++            buffer[sizeof(buffer) - 1] = '\0';
++            identifier.name = buffer;
++        }
+ 
+-    // Check to see if the device is on our excluded list
+-    for (size_t i = 0; i < mExcludedDevices.size(); i++) {
+-        const std::string& item = mExcludedDevices[i];
+-        if (identifier.name == item) {
+-            ALOGI("ignoring event id %s driver %s\n", devicePath.c_str(), item.c_str());
++        // Check to see if the device is on our excluded list
++        for (size_t i = 0; i < mExcludedDevices.size(); i++) {
++            const std::string& item = mExcludedDevices[i];
++            if (identifier.name == item) {
++                ALOGI("ignoring event id %s driver %s\n", devicePath.c_str(), item.c_str());
++                close(fd);
++                return;
++            }
++        }
++
++        // Get device driver version.
++        if (ioctl(fd, EVIOCGVERSION, &driverVersion)) {
++            ALOGE("could not get driver version for %s, %s\n", devicePath.c_str(), strerror(errno));
+             close(fd);
+             return;
+         }
+-    }
+ 
+-    // Get device driver version.
+-    int driverVersion;
+-    if (ioctl(fd, EVIOCGVERSION, &driverVersion)) {
+-        ALOGE("could not get driver version for %s, %s\n", devicePath.c_str(), strerror(errno));
+-        close(fd);
+-        return;
+-    }
+-
+-    // Get device identifier.
+-    struct input_id inputId;
+-    if (ioctl(fd, EVIOCGID, &inputId)) {
+-        ALOGE("could not get device input id for %s, %s\n", devicePath.c_str(), strerror(errno));
+-        close(fd);
+-        return;
+-    }
+-    identifier.bus = inputId.bustype;
+-    identifier.product = inputId.product;
+-    identifier.vendor = inputId.vendor;
+-    identifier.version = inputId.version;
++        // Get device identifier.
++        struct input_id inputId;
++        if (ioctl(fd, EVIOCGID, &inputId)) {
++            ALOGE("could not get device input id for %s, %s\n", devicePath.c_str(),
++                  strerror(errno));
++            close(fd);
++            return;
++        }
++        identifier.bus = inputId.bustype;
++        identifier.product = inputId.product;
++        identifier.vendor = inputId.vendor;
++        identifier.version = inputId.version;
+ 
+-    // Get device physical location.
+-    if (ioctl(fd, EVIOCGPHYS(sizeof(buffer) - 1), &buffer) < 1) {
+-        // fprintf(stderr, "could not get location for %s, %s\n", devicePath, strerror(errno));
+-    } else {
+-        buffer[sizeof(buffer) - 1] = '\0';
+-        identifier.location = buffer;
+-    }
++        // Get device physical location.
++        if (ioctl(fd, EVIOCGPHYS(sizeof(buffer) - 1), &buffer) < 1) {
++            // fprintf(stderr, "could not get location for %s, %s\n", devicePath, strerror(errno));
++        } else {
++            buffer[sizeof(buffer) - 1] = '\0';
++            identifier.location = buffer;
++        }
+ 
+-    // Get device unique id.
+-    if (ioctl(fd, EVIOCGUNIQ(sizeof(buffer) - 1), &buffer) < 1) {
+-        // fprintf(stderr, "could not get idstring for %s, %s\n", devicePath, strerror(errno));
+-    } else {
+-        buffer[sizeof(buffer) - 1] = '\0';
+-        identifier.uniqueId = buffer;
++        // Get device unique id.
++        if (ioctl(fd, EVIOCGUNIQ(sizeof(buffer) - 1), &buffer) < 1) {
++            // fprintf(stderr, "could not get idstring for %s, %s\n", devicePath, strerror(errno));
++        } else {
++            buffer[sizeof(buffer) - 1] = '\0';
++            identifier.uniqueId = buffer;
++        }
+     }
+ 
+     // Fill in the descriptor.
+@@ -2060,179 +2157,246 @@ void EventHub::openDeviceLocked(const std::string& devicePath) {
+         }
+     }
+ 
+-    // Figure out the kinds of events the device reports.
+-    device->readDeviceBitMask(EVIOCGBIT(EV_KEY, 0), device->keyBitmask);
+-    device->readDeviceBitMask(EVIOCGBIT(EV_ABS, 0), device->absBitmask);
+-    device->readDeviceBitMask(EVIOCGBIT(EV_REL, 0), device->relBitmask);
+-    device->readDeviceBitMask(EVIOCGBIT(EV_SW, 0), device->swBitmask);
+-    device->readDeviceBitMask(EVIOCGBIT(EV_LED, 0), device->ledBitmask);
+-    device->readDeviceBitMask(EVIOCGBIT(EV_FF, 0), device->ffBitmask);
+-    device->readDeviceBitMask(EVIOCGBIT(EV_MSC, 0), device->mscBitmask);
+-    device->readDeviceBitMask(EVIOCGPROP(0), device->propBitmask);
+-
+-    // See if this is a keyboard.  Ignore everything in the button range except for
+-    // joystick and gamepad buttons which are handled like keyboards for the most part.
+-    bool haveKeyboardKeys =
+-            device->keyBitmask.any(0, BTN_MISC) || device->keyBitmask.any(BTN_WHEEL, KEY_MAX + 1);
+-    bool haveGamepadButtons = device->keyBitmask.any(BTN_MISC, BTN_MOUSE) ||
+-            device->keyBitmask.any(BTN_JOYSTICK, BTN_DIGI);
+-    if (haveKeyboardKeys || haveGamepadButtons) {
+-        device->classes |= InputDeviceClass::KEYBOARD;
+-    }
++    if (!isWayland) {
++        // Figure out the kinds of events the device reports.
++        device->readDeviceBitMask(EVIOCGBIT(EV_KEY, 0), device->keyBitmask);
++        device->readDeviceBitMask(EVIOCGBIT(EV_ABS, 0), device->absBitmask);
++        device->readDeviceBitMask(EVIOCGBIT(EV_REL, 0), device->relBitmask);
++        device->readDeviceBitMask(EVIOCGBIT(EV_SW, 0), device->swBitmask);
++        device->readDeviceBitMask(EVIOCGBIT(EV_LED, 0), device->ledBitmask);
++        device->readDeviceBitMask(EVIOCGBIT(EV_FF, 0), device->ffBitmask);
++        device->readDeviceBitMask(EVIOCGBIT(EV_MSC, 0), device->mscBitmask);
++        device->readDeviceBitMask(EVIOCGPROP(0), device->propBitmask);
++
++        // See if this is a keyboard.  Ignore everything in the button range except for
++        // joystick and gamepad buttons which are handled like keyboards for the most part.
++        bool haveKeyboardKeys = device->keyBitmask.any(0, BTN_MISC) ||
++                device->keyBitmask.any(BTN_WHEEL, KEY_MAX + 1);
++        bool haveGamepadButtons = device->keyBitmask.any(BTN_MISC, BTN_MOUSE) ||
++                device->keyBitmask.any(BTN_JOYSTICK, BTN_DIGI);
++        if (haveKeyboardKeys || haveGamepadButtons) {
++            device->classes |= InputDeviceClass::KEYBOARD;
++        }
+ 
+-    // See if this is a cursor device such as a trackball or mouse.
+-    if (device->keyBitmask.test(BTN_MOUSE) && device->relBitmask.test(REL_X) &&
+-        device->relBitmask.test(REL_Y)) {
+-        device->classes |= InputDeviceClass::CURSOR;
+-    }
++        // See if this is a cursor device such as a trackball or mouse.
++        if (device->keyBitmask.test(BTN_MOUSE) && device->relBitmask.test(REL_X) &&
++            device->relBitmask.test(REL_Y)) {
++            device->classes |= InputDeviceClass::CURSOR;
++        }
+ 
+-    // See if this is a rotary encoder type device.
+-    String8 deviceType = String8();
+-    if (device->configuration &&
+-        device->configuration->tryGetProperty(String8("device.type"), deviceType)) {
+-        if (!deviceType.compare(String8("rotaryEncoder"))) {
+-            device->classes |= InputDeviceClass::ROTARY_ENCODER;
+-        }
+-    }
+-
+-    // See if this is a touch pad.
+-    // Is this a new modern multi-touch driver?
+-    if (device->absBitmask.test(ABS_MT_POSITION_X) && device->absBitmask.test(ABS_MT_POSITION_Y)) {
+-        // Some joysticks such as the PS3 controller report axes that conflict
+-        // with the ABS_MT range.  Try to confirm that the device really is
+-        // a touch screen.
+-        if (device->keyBitmask.test(BTN_TOUCH) || !haveGamepadButtons) {
+-            device->classes |= (InputDeviceClass::TOUCH | InputDeviceClass::TOUCH_MT);
+-        }
+-        // Is this an old style single-touch driver?
+-    } else if (device->keyBitmask.test(BTN_TOUCH) && device->absBitmask.test(ABS_X) &&
+-               device->absBitmask.test(ABS_Y)) {
+-        device->classes |= InputDeviceClass::TOUCH;
+-        // Is this a BT stylus?
+-    } else if ((device->absBitmask.test(ABS_PRESSURE) || device->keyBitmask.test(BTN_TOUCH)) &&
+-               !device->absBitmask.test(ABS_X) && !device->absBitmask.test(ABS_Y)) {
+-        device->classes |= InputDeviceClass::EXTERNAL_STYLUS;
+-        // Keyboard will try to claim some of the buttons but we really want to reserve those so we
+-        // can fuse it with the touch screen data, so just take them back. Note this means an
+-        // external stylus cannot also be a keyboard device.
+-        device->classes &= ~InputDeviceClass::KEYBOARD;
+-    }
+-
+-    // See if this device is a joystick.
+-    // Assumes that joysticks always have gamepad buttons in order to distinguish them
+-    // from other devices such as accelerometers that also have absolute axes.
+-    if (haveGamepadButtons) {
+-        auto assumedClasses = device->classes | InputDeviceClass::JOYSTICK;
+-        for (int i = 0; i <= ABS_MAX; i++) {
+-            if (device->absBitmask.test(i) &&
+-                (getAbsAxisUsage(i, assumedClasses).test(InputDeviceClass::JOYSTICK))) {
+-                device->classes = assumedClasses;
+-                break;
++        // See if this is a rotary encoder type device.
++        String8 deviceType = String8();
++        if (device->configuration &&
++            device->configuration->tryGetProperty(String8("device.type"), deviceType)) {
++            if (!deviceType.compare(String8("rotaryEncoder"))) {
++                device->classes |= InputDeviceClass::ROTARY_ENCODER;
+             }
+         }
+-    }
+ 
+-    // Check whether this device is an accelerometer.
+-    if (device->propBitmask.test(INPUT_PROP_ACCELEROMETER)) {
+-        device->classes |= InputDeviceClass::SENSOR;
+-    }
++        // See if this is a touch pad.
++        // Is this a new modern multi-touch driver?
++        if (device->absBitmask.test(ABS_MT_POSITION_X) &&
++            device->absBitmask.test(ABS_MT_POSITION_Y)) {
++            // Some joysticks such as the PS3 controller report axes that conflict
++            // with the ABS_MT range.  Try to confirm that the device really is
++            // a touch screen.
++            if (device->keyBitmask.test(BTN_TOUCH) || !haveGamepadButtons) {
++                device->classes |= (InputDeviceClass::TOUCH | InputDeviceClass::TOUCH_MT);
++            }
++            // Is this an old style single-touch driver?
++        } else if (device->keyBitmask.test(BTN_TOUCH) && device->absBitmask.test(ABS_X) &&
++                   device->absBitmask.test(ABS_Y)) {
++            device->classes |= InputDeviceClass::TOUCH;
++            // Is this a BT stylus?
++        } else if ((device->absBitmask.test(ABS_PRESSURE) || device->keyBitmask.test(BTN_TOUCH)) &&
++                   !device->absBitmask.test(ABS_X) && !device->absBitmask.test(ABS_Y)) {
++            device->classes |= InputDeviceClass::EXTERNAL_STYLUS;
++            // Keyboard will try to claim some of the buttons but we really want to reserve those so
++            // we can fuse it with the touch screen data, so just take them back. Note this means an
++            // external stylus cannot also be a keyboard device.
++            device->classes &= ~InputDeviceClass::KEYBOARD;
++        }
++
++        // See if this device is a joystick.
++        // Assumes that joysticks always have gamepad buttons in order to distinguish them
++        // from other devices such as accelerometers that also have absolute axes.
++        if (haveGamepadButtons) {
++            auto assumedClasses = device->classes | InputDeviceClass::JOYSTICK;
++            for (int i = 0; i <= ABS_MAX; i++) {
++                if (device->absBitmask.test(i) &&
++                    (getAbsAxisUsage(i, assumedClasses).test(InputDeviceClass::JOYSTICK))) {
++                    device->classes = assumedClasses;
++                    break;
++                }
++            }
++        }
+ 
+-    // Check whether this device has switches.
+-    for (int i = 0; i <= SW_MAX; i++) {
+-        if (device->swBitmask.test(i)) {
+-            device->classes |= InputDeviceClass::SWITCH;
+-            break;
++        // Check whether this device is an accelerometer.
++        if (device->propBitmask.test(INPUT_PROP_ACCELEROMETER)) {
++            device->classes |= InputDeviceClass::SENSOR;
+         }
+-    }
+ 
+-    // Check whether this device supports the vibrator.
+-    if (device->ffBitmask.test(FF_RUMBLE)) {
+-        device->classes |= InputDeviceClass::VIBRATOR;
+-    }
++        // Check whether this device has switches.
++        for (int i = 0; i <= SW_MAX; i++) {
++            if (device->swBitmask.test(i)) {
++                device->classes |= InputDeviceClass::SWITCH;
++                break;
++            }
++        }
+ 
+-    // Configure virtual keys.
+-    if ((device->classes.test(InputDeviceClass::TOUCH))) {
+-        // Load the virtual keys for the touch screen, if any.
+-        // We do this now so that we can make sure to load the keymap if necessary.
+-        bool success = device->loadVirtualKeyMapLocked();
+-        if (success) {
+-            device->classes |= InputDeviceClass::KEYBOARD;
++        // Check whether this device supports the vibrator.
++        if (device->ffBitmask.test(FF_RUMBLE)) {
++            device->classes |= InputDeviceClass::VIBRATOR;
+         }
+-    }
+ 
+-    // Load the key map.
+-    // We need to do this for joysticks too because the key layout may specify axes, and for
+-    // sensor as well because the key layout may specify the axes to sensor data mapping.
+-    status_t keyMapStatus = NAME_NOT_FOUND;
+-    if (device->classes.any(InputDeviceClass::KEYBOARD | InputDeviceClass::JOYSTICK |
+-                            InputDeviceClass::SENSOR)) {
+-        // Load the keymap for the device.
+-        keyMapStatus = device->loadKeyMapLocked();
+-    }
++        // Configure virtual keys.
++        if ((device->classes.test(InputDeviceClass::TOUCH))) {
++            // Load the virtual keys for the touch screen, if any.
++            // We do this now so that we can make sure to load the keymap if necessary.
++            bool success = device->loadVirtualKeyMapLocked();
++            if (success) {
++                device->classes |= InputDeviceClass::KEYBOARD;
++            }
++        }
+ 
+-    // Configure the keyboard, gamepad or virtual keyboard.
+-    if (device->classes.test(InputDeviceClass::KEYBOARD)) {
+-        // Register the keyboard as a built-in keyboard if it is eligible.
+-        if (!keyMapStatus && mBuiltInKeyboardId == NO_BUILT_IN_KEYBOARD &&
+-            isEligibleBuiltInKeyboard(device->identifier, device->configuration.get(),
+-                                      &device->keyMap)) {
+-            mBuiltInKeyboardId = device->id;
++        // Load the key map.
++        // We need to do this for joysticks too because the key layout may specify axes, and for
++        // sensor as well because the key layout may specify the axes to sensor data mapping.
++        status_t keyMapStatus = NAME_NOT_FOUND;
++        if (device->classes.any(InputDeviceClass::KEYBOARD | InputDeviceClass::JOYSTICK |
++                                InputDeviceClass::SENSOR)) {
++            // Load the keymap for the device.
++            keyMapStatus = device->loadKeyMapLocked();
+         }
+ 
+-        // 'Q' key support = cheap test of whether this is an alpha-capable kbd
+-        if (device->hasKeycodeLocked(AKEYCODE_Q)) {
+-            device->classes |= InputDeviceClass::ALPHAKEY;
++        // Configure the keyboard, gamepad or virtual keyboard.
++        if (device->classes.test(InputDeviceClass::KEYBOARD)) {
++            // Register the keyboard as a built-in keyboard if it is eligible.
++            if (!keyMapStatus && mBuiltInKeyboardId == NO_BUILT_IN_KEYBOARD &&
++                isEligibleBuiltInKeyboard(device->identifier, device->configuration.get(),
++                                          &device->keyMap)) {
++                mBuiltInKeyboardId = device->id;
++            }
++
++            // 'Q' key support = cheap test of whether this is an alpha-capable kbd
++            if (device->hasKeycodeLocked(AKEYCODE_Q)) {
++                device->classes |= InputDeviceClass::ALPHAKEY;
++            }
++
++            // See if this device has a DPAD.
++            if (device->hasKeycodeLocked(AKEYCODE_DPAD_UP) &&
++                device->hasKeycodeLocked(AKEYCODE_DPAD_DOWN) &&
++                device->hasKeycodeLocked(AKEYCODE_DPAD_LEFT) &&
++                device->hasKeycodeLocked(AKEYCODE_DPAD_RIGHT) &&
++                device->hasKeycodeLocked(AKEYCODE_DPAD_CENTER)) {
++                device->classes |= InputDeviceClass::DPAD;
++            }
++
++            // See if this device has a gamepad.
++            for (size_t i = 0; i < sizeof(GAMEPAD_KEYCODES) / sizeof(GAMEPAD_KEYCODES[0]); i++) {
++                if (device->hasKeycodeLocked(GAMEPAD_KEYCODES[i])) {
++                    device->classes |= InputDeviceClass::GAMEPAD;
++                    break;
++                }
++            }
+         }
+ 
+-        // See if this device has a DPAD.
+-        if (device->hasKeycodeLocked(AKEYCODE_DPAD_UP) &&
+-            device->hasKeycodeLocked(AKEYCODE_DPAD_DOWN) &&
+-            device->hasKeycodeLocked(AKEYCODE_DPAD_LEFT) &&
+-            device->hasKeycodeLocked(AKEYCODE_DPAD_RIGHT) &&
+-            device->hasKeycodeLocked(AKEYCODE_DPAD_CENTER)) {
+-            device->classes |= InputDeviceClass::DPAD;
++        // If the device isn't recognized as something we handle, don't monitor it.
++        if (device->classes == ftl::Flags<InputDeviceClass>(0)) {
++            ALOGV("Dropping device: id=%d, path='%s', name='%s'", deviceId, devicePath.c_str(),
++                  device->identifier.name.c_str());
++            return;
+         }
+ 
+-        // See if this device has a gamepad.
+-        for (size_t i = 0; i < sizeof(GAMEPAD_KEYCODES) / sizeof(GAMEPAD_KEYCODES[0]); i++) {
+-            if (device->hasKeycodeLocked(GAMEPAD_KEYCODES[i])) {
+-                device->classes |= InputDeviceClass::GAMEPAD;
+-                break;
+-            }
++        // Classify InputDeviceClass::BATTERY.
++        if (hasBattery) {
++            device->classes |= InputDeviceClass::BATTERY;
+         }
+-    }
+ 
+-    // If the device isn't recognized as something we handle, don't monitor it.
+-    if (device->classes == ftl::Flags<InputDeviceClass>(0)) {
+-        ALOGV("Dropping device: id=%d, path='%s', name='%s'", deviceId, devicePath.c_str(),
+-              device->identifier.name.c_str());
+-        return;
+-    }
++        // Classify InputDeviceClass::LIGHT.
++        if (hasLights) {
++            device->classes |= InputDeviceClass::LIGHT;
++        }
+ 
+-    // Classify InputDeviceClass::BATTERY.
+-    if (hasBattery) {
+-        device->classes |= InputDeviceClass::BATTERY;
+-    }
++        // Determine whether the device has a mic.
++        if (device->deviceHasMicLocked()) {
++            device->classes |= InputDeviceClass::MIC;
++        }
+ 
+-    // Classify InputDeviceClass::LIGHT.
+-    if (hasLights) {
+-        device->classes |= InputDeviceClass::LIGHT;
+-    }
++        // Determine whether the device is external or internal.
++        if (device->isExternalDeviceLocked()) {
++            device->classes |= InputDeviceClass::EXTERNAL;
++        }
+ 
+-    // Determine whether the device has a mic.
+-    if (device->deviceHasMicLocked()) {
+-        device->classes |= InputDeviceClass::MIC;
+-    }
++        if (device->classes.any(InputDeviceClass::JOYSTICK | InputDeviceClass::DPAD) &&
++            device->classes.test(InputDeviceClass::GAMEPAD)) {
++            device->controllerNumber = getNextControllerNumberLocked(device->identifier.name);
++            device->setLedForControllerLocked();
++        }
+ 
+-    // Determine whether the device is external or internal.
+-    if (device->isExternalDeviceLocked()) {
+-        device->classes |= InputDeviceClass::EXTERNAL;
+-    }
++    } else {
++        if (inputType == WL_INPUT_TOUCH) {
++            device->classes |= InputDeviceClass::TOUCH_MT;
++
++            device->propBitmask.set(INPUT_PROP_DIRECT);
++
++            device->absBitmask.set(ABS_MT_POSITION_X);
++            device->absBitmask.set(ABS_MT_POSITION_Y);
++            device->absBitmask.set(ABS_MT_TOUCH_MAJOR);
++            device->absBitmask.set(ABS_MT_TOUCH_MINOR);
++            device->absBitmask.set(ABS_MT_ORIENTATION);
++            device->absBitmask.set(ABS_MT_TRACKING_ID);
++            device->absBitmask.set(ABS_MT_PRESSURE);
++            device->absBitmask.set(ABS_MT_SLOT);
++
++            device->absBitmask.set(ABS_X);
++            device->absBitmask.set(ABS_Y);
++            device->absBitmask.set(ABS_PRESSURE);
++        } else if (inputType == WL_INPUT_KEYBOARD) {
++            device->classes |= InputDeviceClass::KEYBOARD;
++            device->classes |= InputDeviceClass::ALPHAKEY;
+ 
+-    if (device->classes.any(InputDeviceClass::JOYSTICK | InputDeviceClass::DPAD) &&
+-        device->classes.test(InputDeviceClass::GAMEPAD)) {
+-        device->controllerNumber = getNextControllerNumberLocked(device->identifier.name);
+-        device->setLedForControllerLocked();
++            device->keyBitmask.set(BTN_MISC);
++            device->keyBitmask.set(KEY_OK);
++
++            // Load the keymap for the device.
++            device->loadKeyMapLocked();
++        } else if (inputType == WL_INPUT_POINTER) {
++            device->classes |= InputDeviceClass::CURSOR;
++
++            device->propBitmask.set(INPUT_PROP_POINTER);
++
++            device->absBitmask.set(ABS_X);
++            device->absBitmask.set(ABS_Y);
++            device->keyBitmask.set(BTN_MOUSE);
++            device->relBitmask.set(REL_X);
++            device->relBitmask.set(REL_Y);
++            device->relBitmask.set(REL_HWHEEL);
++            device->relBitmask.set(REL_WHEEL);
++        } else if (inputType == WL_INPUT_TABLET) {
++            device->classes |= InputDeviceClass::EXTERNAL_STYLUS | InputDeviceClass::TOUCH;
++
++            device->propBitmask.set(INPUT_PROP_DIRECT);
++
++            device->keyBitmask.set(BTN_TOOL_PEN);
++            device->keyBitmask.set(BTN_TOOL_RUBBER);
++            device->keyBitmask.set(BTN_TOOL_BRUSH);
++            device->keyBitmask.set(BTN_TOOL_PENCIL);
++            device->keyBitmask.set(BTN_TOOL_AIRBRUSH);
++            device->keyBitmask.set(BTN_TOOL_FINGER);
++            device->keyBitmask.set(BTN_TOOL_MOUSE);
++            device->keyBitmask.set(BTN_TOOL_LENS);
++            device->keyBitmask.set(BTN_TOUCH);
++            device->keyBitmask.set(BTN_STYLUS);
++            device->keyBitmask.set(BTN_STYLUS2);
++            device->keyBitmask.set(BTN_STYLUS3);
++            device->absBitmask.set(ABS_X);
++            device->absBitmask.set(ABS_Y);
++            device->absBitmask.set(ABS_PRESSURE);
++            device->absBitmask.set(ABS_DISTANCE);
++            device->absBitmask.set(ABS_TILT_X);
++            device->absBitmask.set(ABS_TILT_Y);
++        }
+     }
+ 
+     if (registerDeviceForEpollLocked(*device) != OK) {
+diff --git a/services/inputflinger/reader/include/EventHub.h b/services/inputflinger/reader/include/EventHub.h
+index 130c556..4e169ef 100644
+--- a/services/inputflinger/reader/include/EventHub.h
++++ b/services/inputflinger/reader/include/EventHub.h
+@@ -381,6 +381,9 @@ public:
+     inline bool test(size_t bit) const {
+         return (bit < BITS) ? mData[bit / WIDTH].test(bit % WIDTH) : false;
+     }
++    inline void set(size_t bit) {
++        mData[bit / WIDTH].set(bit % WIDTH);
++    }
+     /* Returns total number of bytes needed for the array */
+     inline size_t bytes() { return (BITS + CHAR_BIT - 1) / CHAR_BIT; }
+     /* Returns true if array contains any non-zero bit from the range defined by start and end
+@@ -596,6 +599,10 @@ private:
+         status_t enable();
+         status_t disable();
+         bool hasValidFd() const;
++        // Wayland input endpoints are Linux FIFOs carrying input_event records,
++        // not evdev nodes.  Keep this distinction in the device object so every
++        // evdev-only operation observes the same invariant.
++        bool isWayland() const { return identifier.location == "wayland"; }
+         const bool isVirtual; // set if fd < 0 is passed to constructor
+ 
+         const std::shared_ptr<KeyCharacterMap> getKeyCharacterMap() const;
+diff --git a/services/inputflinger/reader/mapper/CursorInputMapper.cpp b/services/inputflinger/reader/mapper/CursorInputMapper.cpp
+index 8233682..cfb177d 100644
+--- a/services/inputflinger/reader/mapper/CursorInputMapper.cpp
++++ b/services/inputflinger/reader/mapper/CursorInputMapper.cpp
+@@ -64,10 +64,39 @@ void CursorMotionAccumulator::finishSync() {
+     clearRelativeAxes();
+ }
+ 
++// --- CursorPositionAccumulator ---
++
++CursorPositionAccumulator::CursorPositionAccumulator() {
++    clearPosition();
++}
++
++void CursorPositionAccumulator::reset(InputDeviceContext& deviceContext) {
++    clearPosition();
++}
++
++void CursorPositionAccumulator::clearPosition() {
++    mX = 0;
++    mY = 0;
++}
++
++void CursorPositionAccumulator::process(const RawEvent* rawEvent) {
++    if (rawEvent->type == EV_ABS) {
++        switch (rawEvent->code) {
++            case ABS_X:
++                mX = rawEvent->value;
++                break;
++            case ABS_Y:
++                mY = rawEvent->value;
++                break;
++        }
++    }
++}
++
+ // --- CursorInputMapper ---
+ 
+ CursorInputMapper::CursorInputMapper(InputDeviceContext& deviceContext)
+-      : InputMapper(deviceContext) {}
++      : InputMapper(deviceContext),
++        mIsWaylandDevice(deviceContext.getDeviceIdentifier().location == "wayland") {}
+ 
+ CursorInputMapper::~CursorInputMapper() {}
+ 
+@@ -279,6 +308,7 @@ void CursorInputMapper::reset(nsecs_t when) {
+ 
+     mCursorButtonAccumulator.reset(getDeviceContext());
+     mCursorMotionAccumulator.reset(getDeviceContext());
++    mCursorPositionAccumulator.reset(getDeviceContext());
+     mCursorScrollAccumulator.reset(getDeviceContext());
+ 
+     InputMapper::reset(when);
+@@ -287,6 +317,7 @@ void CursorInputMapper::reset(nsecs_t when) {
+ void CursorInputMapper::process(const RawEvent* rawEvent) {
+     mCursorButtonAccumulator.process(rawEvent);
+     mCursorMotionAccumulator.process(rawEvent);
++    mCursorPositionAccumulator.process(rawEvent);
+     mCursorScrollAccumulator.process(rawEvent);
+ 
+     if (rawEvent->type == EV_SYN && rawEvent->code == SYN_REPORT) {
+@@ -351,7 +382,7 @@ void CursorInputMapper::sync(nsecs_t when, nsecs_t readTime) {
+         if (moved || scrolled || buttonsChanged) {
+             mPointerController->setPresentation(PointerControllerInterface::Presentation::POINTER);
+ 
+-            if (moved) {
++            if (moved && !mIsWaylandDevice) {
+                 mPointerController->move(deltaX, deltaY);
+             }
+ 
+@@ -362,6 +393,11 @@ void CursorInputMapper::sync(nsecs_t when, nsecs_t readTime) {
+             mPointerController->unfade(PointerControllerInterface::Transition::IMMEDIATE);
+         }
+ 
++        if (mIsWaylandDevice) {
++            mPointerController->setPosition(mCursorPositionAccumulator.getX(),
++                                            mCursorPositionAccumulator.getY());
++        }
++
+         mPointerController->getPosition(&xCursorPosition, &yCursorPosition);
+ 
+         pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_X, xCursorPosition);
+diff --git a/services/inputflinger/reader/mapper/CursorInputMapper.h b/services/inputflinger/reader/mapper/CursorInputMapper.h
+index 60b3dd9..8746af7 100644
+--- a/services/inputflinger/reader/mapper/CursorInputMapper.h
++++ b/services/inputflinger/reader/mapper/CursorInputMapper.h
+@@ -51,6 +51,25 @@ private:
+     void clearRelativeAxes();
+ };
+ 
++/* Keeps track of cursor position. */
++
++class CursorPositionAccumulator {
++public:
++    CursorPositionAccumulator();
++    void reset(InputDeviceContext& deviceContext);
++
++    void process(const RawEvent* rawEvent);
++
++    inline int32_t getX() const { return mX; }
++    inline int32_t getY() const { return mY; }
++
++private:
++    int32_t mX;
++    int32_t mY;
++
++    void clearPosition();
++};
++
+ class CursorInputMapper : public InputMapper {
+ public:
+     explicit CursorInputMapper(InputDeviceContext& deviceContext);
+@@ -92,8 +111,11 @@ private:
+         bool orientationAware;
+     } mParameters;
+ 
++    bool mIsWaylandDevice;
++
+     CursorButtonAccumulator mCursorButtonAccumulator;
+     CursorMotionAccumulator mCursorMotionAccumulator;
++    CursorPositionAccumulator mCursorPositionAccumulator;
+     CursorScrollAccumulator mCursorScrollAccumulator;
+ 
+     int32_t mSource;

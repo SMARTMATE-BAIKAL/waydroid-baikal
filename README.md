@@ -5,6 +5,16 @@
 Waydroid uses a container-based approach to boot a full Android system on a
 regular GNU/Linux system.
 
+## Baikal distribution
+
+The Baikal build is maintained by Timofei Granovskii <t.stifix@gmail.com>.
+`packaging/PKGBUILD` produces a single aarch64 `waydroid-baikal` package containing
+the host integration and its matched Android framework, ART preopt, native
+InputReader and Wayland HWC overlay. It replaces the retired standalone Android
+runtime package in the same pacman transaction. See `packaging/README.md` for
+build and upgrade instructions and `android-runtime/README.md` for the preserved
+source patches, build provenance and native input verification.
+
 ## Overview
 
 Waydroid uses Linux namespaces (user, pid, uts, net, mount, ipc) to run a

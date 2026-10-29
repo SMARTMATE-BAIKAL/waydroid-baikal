@@ -1,0 +1,14 @@
+diff --git a/include/support/android/locale_bionic.h b/include/support/android/locale_bionic.h
+index ee209ec..4adc2f6 100644
+--- a/include/support/android/locale_bionic.h
++++ b/include/support/android/locale_bionic.h
+@@ -26,7 +26,9 @@ extern "C" {
+ 
+ #if defined(__ANDROID__)
+ 
++#if !defined(__ANDROID_API__) || __ANDROID_API__ < 21
+ #include <support/xlocale/__posix_l_fallback.h>
++#endif
+ 
+ // If we do not have this header, we are in a platform build rather than an NDK
+ // build, which will always be at least as new as the ToT NDK, in which case we
