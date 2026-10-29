@@ -1,7 +1,7 @@
 # Maintainer: Timofei Granovskii <t.stifix@gmail.com>
 pkgname=waydroid-baikal
 pkgver=1.6.3
-pkgrel=5
+pkgrel=6
 pkgdesc='Android application integration with native Baikal session lifecycle'
 arch=('any')
 url='https://github.com/SMARTMATE-BAIKAL/waydroid-baikal'
@@ -14,7 +14,7 @@ provides=("waydroid=$pkgver")
 conflicts=('waydroid')
 replaces=('waydroid')
 install=waydroid-baikal.install
-_commit=632f6b5646367e50ed050bc4392d1253fdd9784e
+_commit=f9bbbe44c86ee3f61f4f390999f0c2744b824a01
 source=("waydroid::git+${WAYDROID_SOURCE_URL:-https://github.com/SMARTMATE-BAIKAL/waydroid-baikal.git}#commit=$_commit"
         'waydroid-session.service'
         '25-baikal-resources.conf'
