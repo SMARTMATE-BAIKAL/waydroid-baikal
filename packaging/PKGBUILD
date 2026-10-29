@@ -16,7 +16,7 @@ conflicts=('waydroid' 'waydroid-android-runtime-baikal')
 replaces=('waydroid' 'waydroid-android-runtime-baikal')
 options=('!strip' '!debug')
 install=waydroid-baikal.install
-_commit=4e4aae999c8ce5189562ed0cb0544b160b64b540
+_commit=0a35ff050408a940539ca5101613844cef81c114
 _runtime_payload=waydroid-android-runtime-20261028.tar.zst
 _runtime_sha256=9efdd249ae4e92b325853da0ef35a8422e46990f22dd368a084b33751202084d
 source=("waydroid::git+${WAYDROID_SOURCE_URL:-https://github.com/SMARTMATE-BAIKAL/waydroid-baikal.git}#commit=$_commit"

@@ -30,7 +30,7 @@ pkgbase = waydroid-baikal
 	noextract = waydroid-android-runtime-20261028.tar.zst
 	options = !strip
 	options = !debug
-	source = waydroid::git+https://github.com/SMARTMATE-BAIKAL/waydroid-baikal.git#commit=4e4aae999c8ce5189562ed0cb0544b160b64b540
+	source = waydroid::git+https://github.com/SMARTMATE-BAIKAL/waydroid-baikal.git#commit=0a35ff050408a940539ca5101613844cef81c114
 	source = waydroid-session.service
 	source = 25-baikal-resources.conf
 	source = README.md
