@@ -17,6 +17,7 @@ lxc.console.path = none
 
 lxc.include = /var/lib/waydroid/lxc/waydroid/config_nodes
 lxc.include = /var/lib/waydroid/lxc/waydroid/config_session
+lxc.include = /var/lib/waydroid/lxc/waydroid/config_input_devices
 
 lxc.hook.post-stop = /dev/null
 

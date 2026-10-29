@@ -95,6 +95,31 @@ _migrate_legacy_services() {
     _remove_known_file /usr/lib/waydroid/tools/services/user_manager.py.before-launch-wrapper-20260531214112 \
         a74a5c2f03b629005fa0a66c8c331198995cb0336398f79700f65f295fb20ae0
 
+    # Input is now owned by the Wayland HWC and the generated LXC policy.
+    # Retire the old mount hook and oneshot synchronizer only when their
+    # contents are the known local implementation.
+    _remove_known_file /usr/local/lib/waydroid-sync-input-devices \
+        895a963a1604d1dcad3e368ef09d1d303f7b5c104de9d0d6621adbd597cbd5f6
+    _remove_known_file /etc/systemd/system/waydroid-input-sync.service \
+        f79490c34d684eacc843bed6b56fad5bfc8909034c73c1492f42679bddc5bc99
+    _remove_known_file /etc/systemd/system/waydroid-container.service.d/45-input-cgroup-allowlist.conf \
+        f2f51ceb8f7c467dbd6d8484a0407e850d5733082f99b044879003d206345f20
+    _remove_known_file /etc/systemd/system/waydroid-container.service.d/50-input-sync-post.conf \
+        b13c4be66cd91625b259b367e6f427db07eaf431e4a4402383bb0d8a8ff85a15
+
+    # The native HWC owns the input FIFOs. Remove the retired mount hook from
+    # an already-generated live LXC config before the old helper is deleted.
+    local config=/var/lib/waydroid/lxc/waydroid/config
+    if [ -f "$config" ]; then
+        sed -i \
+            -e '\#^[[:space:]]*lxc\.hook\.version[[:space:]]*=[[:space:]]*1[[:space:]]*$#d' \
+            -e '\#^[[:space:]]*lxc\.hook\.mount[[:space:]]*=[[:space:]]*/usr/local/lib/waydroid-sync-input-devices[[:space:]]*$#d' \
+            -e '\#^[[:space:]]*lxc\.include[[:space:]]*=[[:space:]]*/var/lib/waydroid/lxc/waydroid/config_input_devices[[:space:]]*$#d' \
+            "$config"
+    fi
+    _remove_known_file /var/lib/waydroid/lxc/waydroid/config_input_devices \
+        aa008244a3868fb28e7c6a764556795e7ae62259261118de709899d8afffd331
+
 }
 
 post_install() {
