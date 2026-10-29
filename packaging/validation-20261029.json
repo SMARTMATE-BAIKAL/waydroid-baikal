@@ -1,20 +1,50 @@
 {
-  "validated_at": "2026-10-29T10:56:42.556660+00:00",
-  "package": "waydroid-baikal 1.6.3-9",
-  "package_sha256": "80138ef83f5cc303ffc9734d39fa1675c489155b73c91b23f76d379c12e3c8ac",
+  "validated_at": "2026-10-29T11:50:11.603719+00:00",
+  "package": "waydroid-baikal 1.6.3-12",
+  "package_sha256": "6e346fe68a029ceadcd23afdd352b8c75f2947766f2437426cffb7325af4963e",
   "packaged_source_commit": "0a35ff050408a940539ca5101613844cef81c114",
-  "retired_runtime_package_installed": false,
+  "host_decoder_source_commit": "f29b7b0a3173c0d87b5774e7dadeaeaea5171401",
   "runtime_file_count": 78,
   "runtime_file_owner": "waydroid-baikal",
   "runtime_identical_to_user_confirmed_generation": true,
   "pacman_Qkk": {
-    "total_files": 321,
+    "total_files": 327,
     "altered_files": 0
   },
   "tests": {
     "host_integration": 68,
-    "runtime_tooling": 25
+    "runtime_tooling": 25,
+    "host_decoder_protocol_shutdown": true,
+    "native_policy_migration": true
   },
+  "host_vaapi_decode": {
+    "sample": "/var/lib/waydroid/data/local/tmp/hwdec_probe.mp4",
+    "encoded_bytes": 7050,
+    "responses": [
+      {
+        "status": 0,
+        "width": 0,
+        "height": 0,
+        "flags": 0
+      },
+      {
+        "status": 0,
+        "width": 320,
+        "height": 240,
+        "flags": 8
+      },
+      {
+        "status": 0,
+        "width": 0,
+        "height": 0,
+        "flags": 0
+      }
+    ],
+    "hardware_only": true,
+    "cpu_readback": false,
+    "seconds": 0.2612
+  },
+  "running_decoder_matches_installed_binary": true,
   "android_boot_completed": "1",
   "android_input_devices": [
     "wayland_pointer",
@@ -22,13 +52,10 @@
     "wayland_keyboard",
     "wayland_tablet"
   ],
-  "android_viewport": [
-    3840,
-    2160
-  ],
   "physical_mouse_and_touch_confirmed_by_user_before_consolidation": true,
   "desktop_processes_unchanged": {
     "kwin_wayland": 1170,
     "crystal-dock": 1875
-  }
+  },
+  "system_and_user_failed_units": 0
 }
